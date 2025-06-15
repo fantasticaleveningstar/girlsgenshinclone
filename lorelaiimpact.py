@@ -90,7 +90,7 @@ def use_normal_attack(attacker: Character, defender: Character, turn_manager: Tu
     attacks = attacker.get_active_normal_chain()
     if not attacks:
         print(f"{attacker.name} has no normal attacks.")
-        return 0, []
+        return 0, [], False
 
     index = attacker.combo_index
     talent = attacks.get_talent(index)
@@ -101,7 +101,6 @@ def use_normal_attack(attacker: Character, defender: Character, turn_manager: Tu
     all_reactions = []
 
     for instance in talent.damage_instances:
-        # Perform ICD check
         allow_element = apply_icd(attacker, defender, instance)
         effective_element = instance.element if allow_element else None
 
@@ -117,25 +116,35 @@ def use_normal_attack(attacker: Character, defender: Character, turn_manager: Tu
             additive_base_dmg_bonus=instance.additive_base_dmg_bonus,
         )
 
-        damage, reactions = calculate_damage(
-            attacker=attacker,
-            defender=defender,
-            instance=modified_instance
-        )
+        result = calculate_damage(attacker, defender, modified_instance)
 
+        damage = result["damage"]
+        reactions = result["reactions"]
         total_damage += damage
         all_reactions.extend(reactions)
 
-    # Handle any passive/on-use effects
+        actual = take_damage(defender, damage, source=attacker, team=[defender])
+        log_damage(
+            source=attacker,
+            target=defender,
+            amount=actual,
+            element=result["element"],
+            crit=result["crit"],
+            label=result["label"],
+            applied_element=result.get("applied_element", False)
+        )
+
+    # Handle any on-use effects (list-based)
     if talent.on_use:
-        talent.on_use(attacker, defender, turn_manager)
+        for effect_fn in talent.on_use:
+            effect_fn(attacker, defender, turn_manager)
 
-    # Increment combo index safely
+    # Advance combo index
     attacker.combo_index += 1
-    if attacker.combo_index >= attacks.length():
-        return total_damage, all_reactions, True
+    combo_complete = attacker.combo_index >= attacks.length()
 
-    return total_damage, all_reactions, False
+    return total_damage, all_reactions, combo_complete
+
 
 def use_skill(attacker: Character, defender: Character, skill_index=0):
     reset_combo(attacker)  # Reset combo

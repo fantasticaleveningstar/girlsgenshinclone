@@ -250,19 +250,6 @@ salon_solitaire = Talent(
     on_use=summon_salon_members,
 )
 
-people_rejoice = Talent(
-    name="Let the People Rejoice",
-    description="Lets her name echo in song.",
-    damage_instances=[
-        DamageInstance(multiplier=0.194,
-                       scaling_stat=StatType.HP,
-                       damage_type=DamageType.BURST,
-                       element=Element.HYDRO,
-                       )
-    ],
-    cooldown=3,
-)
-
 def gain_fanfare_from_hp_change(observer: Character, unit: Character, old_hp: int, new_hp: int):
     if not hasattr(observer, "fanfare_points"):
         return
@@ -286,9 +273,10 @@ def update_party_revelry_bonuses(buff: Buff, unit: Character):
     unit.general_dmg_bonus += bonus_pct
     print(f"{unit.name} receives {bonus_pct*100:.1f}% DMG bonus from Universal Revelry.")
 
-def apply_universal_revelry(attacker: Character, defender: Character, turn_manager: TurnManager):
+def apply_universal_revelry(attacker: Character, defender: Character, turn_manager: TurnManager, **kwargs):
     attacker.fanfare_points = 0  # start from 0
     duration = 3
+    team = kwargs.get("team", [])
 
     for ally in turn_manager.units:
         if isinstance(ally, Character):
@@ -307,6 +295,20 @@ def apply_universal_revelry(attacker: Character, defender: Character, turn_manag
             print(f"{ally.name} is empowered by Universal Revelry.")
 
     return 0, []
+
+people_rejoice = Talent(
+    name="Let the People Rejoice",
+    description="Lets her name echo in song.",
+    damage_instances=[
+        DamageInstance(multiplier=0.194,
+                       scaling_stat=StatType.HP,
+                       damage_type=DamageType.BURST,
+                       element=Element.HYDRO,
+                       )
+    ],
+    cooldown=3,
+    on_use=apply_universal_revelry
+)
 
 furina.set_normal_attack_chain(soloists_solicitation)
 furina.add_talent(salon_solitaire, "skill")

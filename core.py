@@ -152,6 +152,7 @@ class Character(CombatUnit):
                 print(f"{self.name} already has a locked {element.name} aura. No new units applied.")
                 return
             existing.duration = max(existing.duration, 2)
+            existing.units = max(existing.units, 1)
             print(f"{element.name} aura on {self.name} refreshed to {existing.units}U.")
         else:
             self.auras.append(Aura(name=element.name, element=element, units=units))

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
 from core import Character, StatType, Summon, get_speed
-
+from constants import ELEMENT_EMOJIS
 
 class Buff:
     def __init__(self, name, description, stat=None, amount=0, duration=0, source=None, trigger="on_turn_start", reversible=False, effect=None, cleanup_effect=None):
@@ -82,6 +82,24 @@ class TurnManager:
             else:
                 continue
 
+            if hasattr(char, "current_hp") and hasattr(char, "max_hp"):
+                status_emoji = get_hp_status_bar(char.current_hp, char.max_hp)
+                label += f" {status_emoji} ({char.current_hp:,}/{char.max_hp:,} HP)"
+
+            # ENERGY
+            if hasattr(char, "energy_pool") and char.energy_pool:
+                energy_strs = []
+                for etype, val in char.energy_pool.items():
+                    symbol = "🔋"  # optionally map energy types to emojis
+                    name = etype.name if hasattr(etype, "name") else str(etype)
+                    energy_strs.append(f"{symbol}{name}:{val}")
+                label += f" | {' '.join(energy_strs)}"
+
+            # AURAS
+            if hasattr(char, "auras") and char.auras:
+                aura_emojis = [ELEMENT_EMOJIS.get(aura.element, "❓") for aura in char.auras]
+                label += f" | {''.join(aura_emojis)}"
+
             if hasattr(char, "turn_shifted") and char.turn_shifted:
                 label = f"**{label}** [Moved]"
                 
@@ -132,3 +150,18 @@ class TurnManager:
         cycle = self.BASE_TURN_VALUE / speed
         offset = cycle * percent
         self.adjust_turn(unit, offset)
+
+def get_hp_status_bar(current: int, maximum: int) -> str:
+    if maximum == 0:
+        return "❓"
+
+    percent = current / maximum
+
+    if percent > 0.75:
+        return "🟩"
+    elif percent > 0.4:
+        return "🟨"
+    elif percent > 0:
+        return "🟥"
+    else:
+        return "💀"

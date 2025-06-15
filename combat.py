@@ -8,18 +8,7 @@ from collections import defaultdict
 from typing import Optional, Callable
 from core import Character, Element, DamageInstance, StatType, Aura, Summon, DamageType
 from turn import TurnManager
-
-ELEMENT_EMOJIS = {
-    Element.PYRO: "🔥",
-    Element.HYDRO: "💧",
-    Element.CRYO: "❄️",
-    Element.ELECTRO: "⚡",
-    Element.GEO: "💎",
-    Element.ANEMO: "🌪️",
-    Element.DENDRO: "🌿",
-    Element.QUANTUM: "🔮",
-    Element.IMAGINARY: "✨"
-}
+from constants import ELEMENT_EMOJIS
 
 REACTION_EMOJIS = {
     "Forward Melt": "💥❄️🔥",
@@ -48,32 +37,24 @@ REACTION_AURA_CONSUMPTION = {
     # Add more if needed
 }
 
-
 class TextColor:
     RESET = "\033[0m"
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    MAGENTA = "\033[95m"
-    CYAN = "\033[96m"
-    WHITE = "\033[97m"
     BOLD = "\033[1m"
     GRAY = "\033[90m"
+    WHITE = "\033[97m"
 
 ELEMENT_COLORS = {
-    Element.PYRO: TextColor.RED,
-    Element.HYDRO: TextColor.BLUE,
-    Element.ELECTRO: TextColor.MAGENTA,
-    Element.CRYO: TextColor.CYAN,
-    Element.GEO: TextColor.YELLOW,
-    Element.ANEMO: TextColor.GREEN,
-    Element.DENDRO: TextColor.GREEN,
-    Element.QUANTUM: TextColor.WHITE,
-    Element.IMAGINARY: TextColor.GRAY,
-    Element.PHYSICAL: TextColor.WHITE,
+    Element.PYRO: "\033[38;2;255;102;64m",
+    Element.HYDRO: "\033[38;2;0;192;255m",
+    Element.ELECTRO: "\033[38;2;204;128;255m",
+    Element.CRYO: "\033[38;2;122;242;242m",
+    Element.GEO: "\033[38;2;255;176;13m",
+    Element.ANEMO: "\033[38;2;51;215;160m",
+    Element.DENDRO: "\033[38;2;155;229;61m",
+    Element.QUANTUM: "\033[38;2;111;102;221m",
+    Element.IMAGINARY: "\033[38;2;212;189;77m",
+    Element.PHYSICAL: "\033[97m",  # fallback bright white
 }
-
 
 class ReactionHit:
     def __init__(self, source: Character, target: Character, reaction: str, damage: float, element: Element):
@@ -229,7 +210,6 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
         "reactions": reaction_hits,
         "applied_element": applied_element
     }
-
 
 def is_consuming_reaction(reaction: str) -> bool:
     return reaction not in ("Quicken", "Aggravate", "Spread", "Frozen", "Electro-Charged", "Burning")
@@ -405,15 +385,18 @@ def notify_damage_taken(target: Character, amount: int, source: Optional[Charact
 
 def trigger_event(event_name: str, team: list[Character], **kwargs):
     for unit in team:
-        # Trigger passives
+        # Passives
         for passive in getattr(unit, "passives", []):
             if passive.trigger == event_name:
                 passive.effect(observer=unit, **kwargs)
 
-        # Trigger buffs
+        # Buffs
         for buff in getattr(unit, "buffs", []):
             if buff.trigger == event_name and buff.effect:
-                buff.effect(unit)  # buffs don’t use observer pattern (yet)
+                if "unit" not in kwargs:
+                    buff.effect(unit=unit, buff=buff, **kwargs)
+                else:
+                    buff.effect(buff=buff, **kwargs)
 
 def trigger_event_for_unit(event_name: str, unit: Character, **kwargs):
     for passive in getattr(unit, "passives", []):
@@ -430,7 +413,7 @@ def resolve_reactions(reactions: list, team: list[Character]):
             amount=actual,
             element=r.element,
             crit=False,
-            label=r.reaction_type,
+            label=r.reaction,
             is_reaction=True,
             applied_element=True
         )
@@ -491,7 +474,6 @@ def get_teams(turn_manager):
     chars = [u for u in turn_manager.units if isinstance(u, Character)]
     size = getattr(turn_manager, "player_team_size", len(chars) // 2)
     return chars[:size], chars[size:]
-
 
 #character-specific
 
