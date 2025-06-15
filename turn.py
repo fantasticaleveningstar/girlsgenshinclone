@@ -6,7 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
-from core import Character, StatType, Summon
+from core import Character, StatType, Summon, get_speed
+
 
 class Buff:
     def __init__(self, name, description, stat=None, amount=0, duration=0, source=None, trigger="on_turn_start", reversible=False, effect=None, cleanup_effect=None):
@@ -58,7 +59,7 @@ class TurnManager:
         if hasattr(char, "turn_shifted"):
             char.turn_shifted = False
 
-        speed = char.get_stat(StatType.SPD)
+        speed = get_speed(char)
         next_time = current_time + (self.BASE_TURN_VALUE / speed)
 
         order = next(self.counter)
@@ -92,7 +93,7 @@ class TurnManager:
             print(f" {i}. {name} (in {time - self.time:.1f} AV)")
 
     def add_summon(self, summon: Summon):
-        speed = summon.get_stat(StatType.SPD)
+        speed = getattr(summon, "speed", 100)
         order = next(self.counter)
         initial_time = self.time + (self.BASE_TURN_VALUE / speed)
         heapq.heappush(self.timeline, (initial_time, order, summon))
@@ -124,7 +125,6 @@ class TurnManager:
         heapq.heapify(new_timeline)
         self.timeline = new_timeline
         print(f"{unit.name}'s action time adjusted by {offset:+.0f} AV.")
-
         
     def delay_by_percent(self, unit, percent: float):
         """Delay or advance a unit by a percentage of their cycle time."""

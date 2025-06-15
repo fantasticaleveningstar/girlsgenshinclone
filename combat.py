@@ -48,6 +48,33 @@ REACTION_AURA_CONSUMPTION = {
     # Add more if needed
 }
 
+
+class TextColor:
+    RESET = "\033[0m"
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    MAGENTA = "\033[95m"
+    CYAN = "\033[96m"
+    WHITE = "\033[97m"
+    BOLD = "\033[1m"
+    GRAY = "\033[90m"
+
+ELEMENT_COLORS = {
+    Element.PYRO: TextColor.RED,
+    Element.HYDRO: TextColor.BLUE,
+    Element.ELECTRO: TextColor.MAGENTA,
+    Element.CRYO: TextColor.CYAN,
+    Element.GEO: TextColor.YELLOW,
+    Element.ANEMO: TextColor.GREEN,
+    Element.DENDRO: TextColor.GREEN,
+    Element.QUANTUM: TextColor.WHITE,
+    Element.IMAGINARY: TextColor.GRAY,
+    Element.PHYSICAL: TextColor.WHITE,
+}
+
+
 class ReactionHit:
     def __init__(self, source: Character, target: Character, reaction: str, damage: float, element: Element):
         self.source = source
@@ -75,6 +102,40 @@ class ICDTracker:
                 self.hit_counter = 0
             return False
 
+def notify_hp_change(unit: Character, old_hp: int, new_hp: int, team: list[Character]):
+    trigger_event("on_hp_change", team, unit=unit, old_hp=old_hp, new_hp=new_hp)
+
+def heal(target: Character, amount: int, source: Optional[Character] = None, team: Optional[list[Character]] = None):
+    if team is None:
+        team = [target]  # fallback if team not passed
+
+    old_hp = target.current_hp
+    max_heal = target.max_hp - target.current_hp
+    actual_heal = min(amount, max_heal)
+    target.current_hp += actual_heal
+
+    log_heal(source or target, target, actual_heal)
+    notify_hp_change(target, old_hp, target.current_hp, team)
+
+    return actual_heal
+
+def take_damage(target: Character, amount: int, source: Optional[Character] = None, team: Optional[list[Character]] = None, summary: Optional[dict] = None, taken_summary: Optional[dict] = None):
+    if team is None:
+        team = [target]  # fallback if team not passed
+
+    old_hp = target.current_hp
+    target.current_hp = max(0, target.current_hp - amount)
+
+    # Update damage dealt tracker
+    if source and summary is not None:
+        summary[source.name] += amount
+    if taken_summary is not None:
+        taken_summary[target.name] += amount
+
+    notify_hp_change(target, old_hp, target.current_hp, team)
+
+    return amount
+
 def calculate_dmg_bonus(attacker: Character, instance: DamageInstance) -> float:
     base = attacker.general_dmg_bonus
     base += attacker.elemental_bonuses.get(instance.element, 0.0)
@@ -99,27 +160,21 @@ def calculate_res_multiplier(defender: Character, element: Element):
         return 1 / (4 * res + 1)
 
 def calculate_damage(attacker: Character, defender: Character, instance: DamageInstance):
-    #Base DMG
     base_stat = attacker.get_stat(instance.scaling_stat)
     base_damage = (base_stat * instance.multiplier * instance.base_dmg_multiplier)
-
-    #Additive Bonuses
     base_damage += instance.additive_base_dmg_bonus
 
-    #Apply DMG Bonuses
     bonus = calculate_dmg_bonus(attacker, instance)
     reduction = defender.dmg_reduction_taken
     multiplier = 1 + bonus - reduction
     base_damage *= multiplier
 
-    # CRIT calculation
     crit_rate = attacker.get_stat(StatType.CRIT_RATE)
     crit_dmg = attacker.get_stat(StatType.CRIT_DMG)
     is_crit = random.random() < crit_rate
     if is_crit:
         base_damage *= (1 + crit_dmg)
-    
-    #DEF and RES
+
     def_mult = calculate_def_multiplier(attacker, defender)
     res_mult = calculate_res_multiplier(defender, instance.element)
     base_damage *= def_mult * res_mult
@@ -127,8 +182,9 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
     effective_element = instance.element
     reaction_hits = []
 
-    # === Elemental application logic ===
+    applied_element = False
     if effective_element:
+        applied_element = True
         defender.apply_elemental_effect(
             element=effective_element,
             attacker=attacker,
@@ -136,43 +192,44 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
             icd_interval=instance.icd_interval
         )
 
-        # Step 2: Check for a reaction
         reaction, reacted_with = check_reaction(effective_element, defender.auras)
         if reaction:
             emoji = REACTION_EMOJIS.get(reaction, "💥")
             print(f"{emoji} {reaction} triggered by {attacker.name}!")
 
-            # Transformative reactions deal separate damage
             if is_transformative(reaction):
-                reaction_damage = round(calculate_transformative_damage(reaction, attacker))
+                reaction_result = calculate_transformative_damage(reaction, attacker)
                 reaction_hits.append(ReactionHit(
                     source=attacker,
                     target=defender,
-                    reaction=reaction,
-                    damage=reaction_damage,
-                    element=effective_element
+                    reaction=reaction_result["label"],
+                    damage=reaction_result["damage"],
+                    element=reaction_result["element"]
                 ))
 
-            # Amplifying reactions modify base damage
             elif is_amplifying(reaction):
                 reaction_bonus = calculate_amplifying_damage(reaction, attacker)
                 base_damage *= reaction_bonus
-            # Additive reactions like Aggravate/Spread
             elif reaction == "Aggravate":
                 base_damage += check_aggravate(attacker, defender, effective_element)
             elif reaction == "Spread":
                 base_damage += check_spread(attacker, defender, effective_element)
-           # Handle aura consumption
+
             if is_consuming_reaction(reaction) and reacted_with in defender.auras:
                 if isinstance(reacted_with, Aura):
                     consume_aura_units(defender, reacted_with.element, reaction=reaction)
 
-    # Final damage logging
     total_damage = round(base_damage)
-    element_icon = ELEMENT_EMOJIS.get(effective_element, "")
-    print(f"{'CRIT! ' if is_crit else ''}{attacker.name} dealt {total_damage} {element_icon} damage to {defender.name}.")
-    
-    return total_damage, reaction_hits
+
+    return {
+        "damage": total_damage,
+        "crit": is_crit,
+        "element": effective_element,
+        "label": instance.description or "",
+        "reactions": reaction_hits,
+        "applied_element": applied_element
+    }
+
 
 def is_consuming_reaction(reaction: str) -> bool:
     return reaction not in ("Quicken", "Aggravate", "Spread", "Frozen", "Electro-Charged", "Burning")
@@ -220,7 +277,29 @@ def calculate_transformative_damage(reaction: str, attacker: Character) -> float
     base_damage = 1446  # placeholder value for reaction base damage
 
     em_bonus = 1 + (16 * em / (em + 2000))
-    return base_damage * em_bonus * get_transformative_multiplier(reaction)
+    final_damage = base_damage * em_bonus * get_transformative_multiplier(reaction)
+
+    if reaction in ["Bloom", "Hyperbloom", "Burgeon"]:
+        element = Element.DENDRO
+    elif reaction == "Overloaded":
+        element = Element.PYRO
+    elif reaction == "Electro-Charged":
+        element = Element.ELECTRO
+    elif reaction == "Superconduct":
+        element = Element.CRYO
+    elif reaction == "Swirl":
+        element = Element.ANEMO
+    elif reaction == "Shatter":
+        element = Element.PHYSICAL
+    else:
+        element = Element.PHYSICAL  # fallback
+
+    return {
+        "damage": int(final_damage),
+        "element": element,
+        "label": reaction,
+        "crit": False
+    }
 
 def get_transformative_multiplier(reaction: str) -> float:
     return {
@@ -321,7 +400,102 @@ def apply_icd(attacker: Character, defender: Character, instance: DamageInstance
     else:
         return False
 
+def notify_damage_taken(target: Character, amount: int, source: Optional[Character], team: list[Character]):
+    trigger_event("on_damage_taken", team, target=target, amount=amount, source=source)
+
+def trigger_event(event_name: str, team: list[Character], **kwargs):
+    for unit in team:
+        # Trigger passives
+        for passive in getattr(unit, "passives", []):
+            if passive.trigger == event_name:
+                passive.effect(observer=unit, **kwargs)
+
+        # Trigger buffs
+        for buff in getattr(unit, "buffs", []):
+            if buff.trigger == event_name and buff.effect:
+                buff.effect(unit)  # buffs don’t use observer pattern (yet)
+
+def trigger_event_for_unit(event_name: str, unit: Character, **kwargs):
+    for passive in getattr(unit, "passives", []):
+        if passive.trigger == event_name:
+            passive.effect(observer=unit, **kwargs)
+
+def resolve_reactions(reactions: list, team: list[Character]):
+    for r in reactions:
+        r.resolve()
+        actual = take_damage(r.target, r.damage, source=r.source, team=team)
+        log_damage(
+            source=r.source,
+            target=r.target,
+            amount=actual,
+            element=r.element,
+            crit=False,
+            label=r.reaction_type,
+            is_reaction=True,
+            applied_element=True
+        )
+
+def log_damage(source: Character, target: Character, amount: int,
+               element: Optional[Element] = None,
+               crit: bool = False,
+               label: str = "",
+               is_reaction: bool = False,
+               applied_element: bool = False):
+
+    start = target.current_hp + amount
+    end = target.current_hp
+
+    # Format components
+    emoji = ELEMENT_EMOJIS.get(element, "") if applied_element and element else ""
+    color = ELEMENT_COLORS.get(element, TextColor.WHITE)
+    bold = TextColor.BOLD if crit else ""
+    reset = TextColor.RESET
+    gray = TextColor.GRAY
+
+    # Tags
+    tag = "REACTION" if is_reaction else "CRIT" if crit else "DMG"
+
+    # Text segments
+    source_str = f"{source.name}'s " if source else ""
+    label_str = label or "Hit"
+    element_str = f"{element.name.upper()} " if element else ""
+    dmg_str = f"{color}{bold}{amount:,}{reset}"
+
+    print(f"{emoji} [{tag}] {source_str}{label_str} hits {target.name} "
+          f"for {dmg_str} {element_str}DMG "
+          f"{gray}(HP: {start:,} → {end:,}){reset}")
+
+def log_heal(source: Character, target: Character, amount: int):
+    start = target.current_hp - amount
+    end = target.current_hp
+    print(f"[HEAL] 🩹 {source.name} heals {target.name} for {TextColor.GREEN}{amount:,}{TextColor.RESET} HP "
+          f"{TextColor.GRAY}(HP: {start:,} → {end:,}){TextColor.RESET}")
+
+def get_allies(attacker: Character, turn_manager: TurnManager) -> list[Character]:
+    return [
+        unit for unit in turn_manager.units
+        if isinstance(unit, Character)
+        and is_same_team(attacker, unit, turn_manager)
+    ]
+
+def is_same_team(char1: Character, char2: Character, turn_manager: TurnManager) -> bool:
+    team_cutoff = len([u for u in turn_manager.units if isinstance(u, Character)]) // 2
+    char_units = [u for u in turn_manager.units if isinstance(u, Character)]
+    if char1 not in char_units or char2 not in char_units:
+        return False
+    return char_units.index(char1) < team_cutoff and char_units.index(char2) < team_cutoff \
+        or char_units.index(char1) >= team_cutoff and char_units.index(char2) >= team_cutoff
+
+def get_teams(turn_manager):
+    """Splits characters into two teams using stored player_team_size."""
+    chars = [u for u in turn_manager.units if isinstance(u, Character)]
+    size = getattr(turn_manager, "player_team_size", len(chars) // 2)
+    return chars[:size], chars[size:]
+
+
 #character-specific
+
+#Furina
 def salon_attack_action(summon: 'Summon', enemy_team: list[Character]):
     if not enemy_team:
         return
@@ -330,9 +504,10 @@ def salon_attack_action(summon: 'Summon', enemy_team: list[Character]):
     owner = summon.owner
     drained_allies = 0
     damage_multiplier = summon.stats.get("multiplier", 0.1)
-    base_drain = summon.stats.get("hp_drain", 0.08)
-    max_scaling = summon.stats.get("scaling_cap", 1.5)
+    base_drain = summon.stats.get("hp_drain", 0.016)
+    max_scaling = summon.stats.get("scaling_cap", 1.4)
 
+    # Drain allies' HP
     for ally in summon.owner_team:
         min_allowed = ally.max_hp * 0.5
         if ally.current_hp > min_allowed:
@@ -341,7 +516,7 @@ def salon_attack_action(summon: 'Summon', enemy_team: list[Character]):
             drained_allies += 1
             print(f"{summon.name} drains {drain_amount:.0f} HP from {ally.name}.")
 
-    total_multiplier = damage_multiplier * (1 + 0.25 * drained_allies)
+    total_multiplier = damage_multiplier * (1 + 0.1 * drained_allies)
     total_multiplier = min(total_multiplier, damage_multiplier * max_scaling)
 
     damage_instance = DamageInstance(
@@ -353,29 +528,56 @@ def salon_attack_action(summon: 'Summon', enemy_team: list[Character]):
         icd_tag=f"{summon.name}_Strike"
     )
 
-    damage, reactions = calculate_damage(owner, target, damage_instance)
-    print(f"{summon.name} strikes {target.name} for {damage} Hydro damage.")
-    target.current_hp = max(target.current_hp - damage, 0)
+    # Correctly unpack from dict
+    result = calculate_damage(owner, target, damage_instance)
+    damage = result["damage"]
+    reactions = result["reactions"]
 
+    # Apply damage properly
+    actual = take_damage(target, damage, source=owner, team=[target])
+    log_damage(
+        source=owner,
+        target=target,
+        amount=actual,
+        element=result["element"],
+        crit=result["crit"],
+        label=result["label"],
+        is_reaction=False,
+        applied_element=result.get("applied_element", False)
+    )
+
+    # Apply reaction damage (if any)
     for r in reactions:
         r.resolve()
-        r.target.current_hp = max(r.target.current_hp - r.damage, 0)
-        print(f"{r.target.name}'s HP after reaction: {r.target.current_hp}/{r.target.max_hp}")
+        actual_reaction = take_damage(r.target, r.damage, source=r.source, team=[r.target])
+        log_damage(
+            source=r.source,
+            target=r.target,
+            amount=actual_reaction,
+            element=r.element,
+            crit=False,
+            label=r.reaction,
+            is_reaction=True,
+            applied_element=True
+        )
 
 def summon_salon_members(attacker: Character, defender: Character, turn_manager: TurnManager):
-    attacker.summon_turn_counter = 3  # custom duration
+    attacker.summon_turn_counter = 3
+
+    team1, team2 = get_teams(turn_manager)
+    allies = team1 if attacker in team1 else team2
 
     salon_summons = [
-        ("Gentilhomme Usher", 0.08, 110, 0.05),
-        ("Surintendante Chevalmarin", 0.12, 90, 0.07),
-        ("Mademoiselle Crabaletta", 0.15, 100, 0.1),
+        ("Gentilhomme Usher", 0.1013, 110, 0.024),
+        ("Surintendante Chevalmarin", 0.0549, 130, 0.016),
+        ("Mademoiselle Crabaletta", 0.1409, 90, 0.036),
     ]
 
     for name, multiplier, speed, hp_drain in salon_summons:
         summon = Summon(
             name=name,
             owner=attacker,
-            stats={"multiplier": multiplier, "hp_drain": hp_drain, "scaling_cap": 2.0},
+            stats={"multiplier": multiplier, "hp_drain": hp_drain, "scaling_cap": 1.4},
             hp=1,
             duration=None,  # We’ll expire manually
             speed=speed,
@@ -384,7 +586,7 @@ def summon_salon_members(attacker: Character, defender: Character, turn_manager:
                 "on_action": lambda self, enemy_team: salon_attack_action(self, enemy_team)
             }
         )
-        summon.owner_team = [attacker]  # or attacker + allies if using full team ref
+        summon.owner_team = allies
         attacker.summons.append(summon)
         turn_manager.add_summon(summon)
         print(f"{attacker.name} summons {name}.")

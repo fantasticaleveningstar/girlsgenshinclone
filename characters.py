@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
 from core import Character, StatType, Element, DamageInstance, DamageType, Talent, NormalAttackChain, Summon
-from turn import TurnManager
+from turn import TurnManager, Buff
 from combat import summon_salon_members
 
 #yanfei core
@@ -148,7 +148,6 @@ kariyama_rite = Talent(
 
 shinobu.add_talent(kariyama_rite, "burst")
 
-
 #furina core
 furina = Character("Furina",
                    base_stats={
@@ -250,6 +249,68 @@ salon_solitaire = Talent(
     cooldown=5,
     on_use=summon_salon_members,
 )
+
+people_rejoice = Talent(
+    name="Let the People Rejoice",
+    description="Lets her name echo in song.",
+    damage_instances=[
+        DamageInstance(multiplier=0.194,
+                       scaling_stat=StatType.HP,
+                       damage_type=DamageType.BURST,
+                       element=Element.HYDRO,
+                       )
+    ],
+    cooldown=3,
+)
+
+def gain_fanfare_from_hp_change(observer: Character, unit: Character, old_hp: int, new_hp: int):
+    if not hasattr(observer, "fanfare_points"):
+        return
+
+    max_hp = unit.max_hp
+    delta = abs(new_hp - old_hp)
+    percent_change = (delta / max_hp) * 100
+    points_gained = int(percent_change)
+
+    if points_gained > 0:
+        observer.fanfare_points += points_gained
+        print(f"{observer.name} gains {points_gained} Fanfare (total: {observer.fanfare_points}) from {unit.name}'s HP change.")
+
+def update_party_revelry_bonuses(buff: Buff, unit: Character):
+    source = buff.source
+    if not hasattr(source, "fanfare_points"):
+        return
+
+    bonus_pct = source.fanfare_points * 0.0023  # Example: +0.03% per point
+    healing_bonus = source.fanfare_points * 0.0009  # Example: +0.04% per point
+    unit.general_dmg_bonus += bonus_pct
+    print(f"{unit.name} receives {bonus_pct*100:.1f}% DMG bonus from Universal Revelry.")
+
+def apply_universal_revelry(attacker: Character, defender: Character, turn_manager: TurnManager):
+    attacker.fanfare_points = 0  # start from 0
+    duration = 3
+
+    for ally in turn_manager.units:
+        if isinstance(ally, Character):
+            buff = Buff(
+                name="Universal Revelry",
+                description="Scales party DMG and healing based on Furina’s Fanfare.",
+                duration=duration,
+                trigger="on_turn_start",  # will be refreshed per turn
+                source=attacker,
+                reversible=True,
+                effect=update_party_revelry_bonuses,
+                cleanup_effect=lambda char: setattr(attacker, "fanfare_points", 0)
+            )
+            ally.buffs.append(buff)
+            turn_manager.add_buff_timer(buff, ally)
+            print(f"{ally.name} is empowered by Universal Revelry.")
+
+    return 0, []
+
+furina.set_normal_attack_chain(soloists_solicitation)
+furina.add_talent(salon_solitaire, "skill")
+furina.add_talent(people_rejoice, "burst")
 
 #end of list
 all_characters = [yanfei]

@@ -33,8 +33,19 @@ class StatType(Enum):
     CRIT_DMG = auto()
     ENERGY_RECHARGE = auto()
 
+class CombatUnit:
+    def __init__(self, name: str, speed: int = 100):
+        self.name = name
+        self.speed = speed
+        self.buffs = []
+        self.debuffs = []
+        self.turn_shifted = False
+
+    def get_speed(self):
+        return max(1, getattr(self, "speed", 100))
+
 @dataclass(unsafe_hash=True)
-class Character:
+class Character(CombatUnit):
     name: str
     base_stats: dict = field(hash=False)
     element: Element
@@ -222,9 +233,9 @@ class Passive:
     def activate(self, **kwargs):
         return self.effect(**kwargs)
 
-class Summon:
+class Summon(CombatUnit):
     def __init__(self, name: str, owner: Character, stats: dict, hp: int, triggers: dict[str, callable], duration: int = None, is_stationary=False, speed=100, talents: list = None):
-        self.name = name
+        super().__init__(name, speed)
         self.owner = owner
         self.stats = stats
         self.max_hp = hp
@@ -233,11 +244,9 @@ class Summon:
         self.duration = duration
         self.remaining_duration = duration
         self.is_stationary = is_stationary
-        self.speed = speed
         self.frozen = False
         self.talents = []
         self.passives = []
-        self.turn_shifted = False
 
     def get_stat(self, stat):
         return self.stats.get(stat, 0)
@@ -256,3 +265,10 @@ class NormalAttackChain:
 
     def length(self):
         return len(self.talents)
+
+def get_speed(unit):
+    if hasattr(unit, 'speed'):
+        return max(1, getattr(unit, "speed", 100))
+    if hasattr(unit, 'get_stat'):
+        return max(1, unit.get_stat(StatType.SPD))
+    return 100  # generic fallback

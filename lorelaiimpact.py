@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
 from core import Character, Element, StatType, Talent, DamageInstance, DamageType, Summon, Passive, NormalAttackChain
-from combat import calculate_damage, apply_icd, salon_attack_action, summon_salon_members
+from combat import calculate_damage, apply_icd, salon_attack_action, summon_salon_members, notify_hp_change, take_damage, heal, notify_damage_taken, resolve_reactions, trigger_event, log_damage, log_heal
 from turn import TurnManager, Buff, BuffTimerUnit
 from characters import yanfei, shinobu, furina
 
@@ -32,33 +32,33 @@ def grant_energy(regular=0, special_type=None, special_amount=0):
             print(f"{attacker.name} gains {special_amount} {special_type}.")
     return effect
 
-def process_buffs(character, trigger_event):
-    for buff in character.buffs[:]:  # Shallow copy to allow removal
-        if buff.trigger == trigger_event:
-            # Call special effect if it exists
-            if buff.effect and not buff.applied:
+def apply_buff_trigger(character: Character, event: str):
+    for buff in character.buffs:
+        if buff.trigger == event and not buff.applied:
+            if buff.effect:
                 buff.effect(character)
-                buff.applied = True
-            elif buff.stat:  # fallback to standard stat buffs
+            elif buff.stat:  # fallback to stat buffs
                 bonus = character.base_stats[buff.stat] * buff.amount
                 character.stats[buff.stat] += bonus
-                buff.applied = True
                 print(f"{character.name}'s {buff.stat.name} increased by {bonus} from {buff.name}.")
+            buff.applied = True
 
-        # Handle expiration
-        if trigger_event == "on_turn_end":
-            if buff.remaining_turns <= 1:
-                # Buff is expiring after this turn
-                if buff.reversible:
-                    if buff.cleanup_effect:
-                        buff.cleanup_effect(character)
-                    elif buff.stat:  # fallback for stat buffs
-                        reduction = character.base_stats[buff.stat] * buff.amount
-                        character.stats[buff.stat] -= reduction
-                        print(f"{character.name}'s {buff.stat.name} returned to normal.")
-                character.buffs.remove(buff)
-            else:
-                buff.remaining_turns -= 1
+def cleanup_expired_buffs(character: Character):
+    active_buffs = []
+    for buff in character.buffs:
+        if buff.remaining_turns <= 1:
+            if buff.reversible:
+                if buff.cleanup_effect:
+                    buff.cleanup_effect(character)
+                elif buff.stat:
+                    reduction = character.base_stats[buff.stat] * buff.amount
+                    character.stats[buff.stat] -= reduction
+                    print(f"{character.name}'s {buff.stat.name} returned to normal.")
+            print(f"{buff.name} expired on {character.name}.")
+        else:
+            buff.remaining_turns -= 1
+            active_buffs.append(buff)
+    character.buffs = active_buffs
 
 def apply_buff(character: Character, buff: Buff):
     if not buff.applied:
@@ -123,10 +123,6 @@ def use_normal_attack(attacker: Character, defender: Character, turn_manager: Tu
             instance=modified_instance
         )
 
-        desc = modified_instance.description or "Hit"
-        element_str = f" {effective_element.name}" if effective_element else ""
-        print(f"{desc} deals {damage}{element_str} damage!")
-
         total_damage += damage
         all_reactions.extend(reactions)
 
@@ -150,72 +146,6 @@ def use_burst(attacker: Character, defender: Character, burst_index=0):
     reset_combo(attacker)  # Reset combo
     burst = attacker.bursts[burst_index]
     return use_talent(attacker, defender, burst)
-
-def use_talent(attacker: Character, defender: Character, talent: Talent, turn_manager: TurnManager):
-    energy_type = talent.energy_type
-    energy_cost = talent.energy_cost
-
-    # === ENERGY CHECK ===
-    if energy_type and attacker.energy_pool.get(energy_type, 0) < energy_cost:
-        print(f"⚠️ {attacker.name} lacks {energy_type} energy to use {talent.name}.")
-        return 0, []
-
-    # === COOLDOWN CHECK ===
-    if attacker.cooldowns.get(talent.id, 0) > 0:
-        print(f"⏳ {talent.name} is on cooldown for {attacker.cooldowns[talent.id]} more turn(s).")
-        return 0, []
-
-    # Apply cooldown
-    if talent.cooldown > 0:
-        attacker.cooldowns[talent.id] = talent.cooldown + 1
-
-    print(f"\n🔷 {attacker.name} uses **{talent.name}**!")
-
-    total_damage = 0
-    all_reactions = []
-
-    for instance in talent.damage_instances:
-        allow_element = apply_icd(attacker, defender, instance)
-        effective_element = instance.element if allow_element else None
-
-        # Construct modified instance (non-destructive to talent base)
-        modified_instance = DamageInstance(
-            multiplier=instance.multiplier,
-            scaling_stat=instance.scaling_stat,
-            damage_type=instance.damage_type,
-            description=instance.description,
-            element=effective_element,
-            icd_tag=instance.icd_tag,
-            icd_interval=instance.icd_interval,
-        )
-
-        damage, reactions = calculate_damage(
-            attacker=attacker,
-            defender=defender,
-            instance=modified_instance
-        )
-
-        desc = modified_instance.description or "Hit"
-        element_str = f" {effective_element.name}" if effective_element else ""
-        print(f"{desc} deals {damage}{element_str} damage!")
-
-        total_damage += damage
-        all_reactions.extend(reactions)
-
-    # === ON-USE EFFECTS (Buffs, healing, summons, etc.) ===
-    for effect_fn in talent.on_use:
-        if callable(effect_fn):
-            result = effect_fn(attacker, defender, turn_manager)
-            if isinstance(result, tuple) and len(result) == 2:
-                extra_damage, extra_reactions = result
-                total_damage += extra_damage
-                all_reactions.extend(extra_reactions)
-
-    # === ENERGY COST ===
-    if energy_cost > 0:
-        attacker.energy_pool[energy_type] -= energy_cost
-
-    return total_damage, all_reactions
 
 def choose_action(character: Character):
     print(f"\n Choose an action:")
@@ -283,6 +213,7 @@ dummy = Character("Dummy",
 def battle_loop(player_team: list[Character], enemy_team: list[Character]):
     all_characters = player_team + enemy_team
     turn_manager = TurnManager(all_characters)
+    turn_manager.player_team_size = len(player_team)
 
     def is_alive(character):
         return character.current_hp > 0
@@ -291,6 +222,8 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
         return [char for char in team if is_alive(char)]
     
     while get_living(player_team) and get_living(enemy_team):
+        turn_damage_summary = defaultdict(int)
+        turn_damage_taken = defaultdict(int)
         turn_manager.preview_turn_order()
 
         current_char = turn_manager.next_turn()
@@ -299,9 +232,9 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
             buff = current_char.buff
 
             # Apply effect if needed
-            if buff.effect and not buff.applied:
-                buff.effect(current_char.owner)
-                buff.applied = True
+            trigger_event("on_buff_tick", [current_char.owner], buff=buff)
+            buff.applied = True
+
 
             
             if buff.remaining_turns <= 0:
@@ -328,7 +261,7 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
         if not is_alive(current_char):
             continue
 
-        process_buffs(current_char, "on_turn_start")
+        trigger_event("on_turn_start", [current_char], unit=current_char)
 
         if isinstance(current_char, Summon):
             print(f"\n=========={current_char.name}'s Turn==========")
@@ -396,14 +329,9 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
 
                 if action_type == "normal":
                     damage, reactions, na_string_done = use_normal_attack(current_char, target, turn_manager)
-                    target.current_hp = max(target.current_hp - damage, 0)
-                    print(f"{target.name}'s HP: {target.current_hp}/{target.max_hp}")
+                    take_damage(target, damage, source=current_char, team=player_team)
 
-                    for r in reactions:
-                        r.resolve()
-                        r.target.current_hp = max(r.target.current_hp -  r.damage, 0)
-                        print(f"{r.target.name}'s HP: {r.target.current_hp}/{r.target.max_hp}")
-
+                    resolve_reactions(reactions, player_team)
                 
                     if na_string_done:
                         print(f"{current_char.name}'s combo string is complete.")
@@ -416,18 +344,16 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
                             combo_active = False
 
                 else:
-                    damage, reactions = use_talent(current_char, target, action, turn_manager)
-                    target.current_hp = max(target.current_hp - damage, 0)
-                    print(f"{target.name}'s HP: {target.current_hp}/{target.max_hp}")
+                    damage, reactions = use_talent(current_char, target, action, turn_manager, summary=turn_damage_summary, taken_summary=turn_damage_taken)
+                    take_damage(target, damage, source=current_char, team=player_team)
 
-                    for r in reactions:
-                        r.resolve()
-                        r.target.current_hp = max(r.target.current_hp -  r.damage, 0)
-                        print(f"{r.target.name}'s HP: {r.target.current_hp}/{r.target.max_hp}")
+
+                    resolve_reactions(reactions, player_team)
 
                     reset_combo(current_char)  # Break combo
                     combo_active = False
-            process_buffs(current_char, "on_turn_end")
+            trigger_event("on_turn_end", [current_char], unit=current_char)
+            cleanup_expired_buffs(current_char)
             
 
             for tid in list(current_char.cooldowns):
@@ -446,20 +372,96 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
                 move = current_char.skills[0]
                 print(f"{current_char.name} targets {target.name}!")
                 damage, reactions = use_talent(current_char, target, move, turn_manager)
-                target.current_hp = max(target.current_hp - damage, 0)
-                print(f"{target.name}'s HP: {target.current_hp}/{target.max_hp}")
+                take_damage(target, damage, source=current_char, team=player_team)
 
-                for r in reactions:
-                        r.resolve()
-                        r.target.current_hp = max(r.target.current_hp -  r.damage, 0)
-                        print(f"{r.target.name}'s HP: {r.target.current_hp}/{r.target.max_hp}")
+
+                resolve_reactions(reactions, player_team)
             else:
                 print(f"{current_char.name} has no skills to use and skips their turn.")
         current_char.decay_auras()
+
+        if turn_damage_summary:
+            print("\n📊 Damage Dealt This Turn:")
+            for name, dmg in turn_damage_summary.items():
+                print(f"  - {name}: {dmg:,} DMG")
+
+        if turn_damage_taken:
+            print("\n🩸 Damage Taken This Turn:")
+            for name, dmg in turn_damage_taken.items():
+                print(f"  - {name}: {dmg:,} DMG")
+
 
     if get_living(player_team):
         print("\n🏆 Victory! Your team wins.")
     else:
         print("\n💀 Defeat. Your team has been wiped out.")
 
-battle_loop(player_team=[shinobu, yanfei], enemy_team=[dummy])
+def use_talent(attacker: Character, defender: Character, talent: Talent, turn_manager: TurnManager, summary: dict = None, taken_summary: dict = None):
+    energy_type = talent.energy_type
+    energy_cost = talent.energy_cost
+
+    # === ENERGY CHECK ===
+    if energy_type and attacker.energy_pool.get(energy_type, 0) < energy_cost:
+        print(f"⚠️ {attacker.name} lacks {energy_type} energy to use {talent.name}.")
+        return 0, []
+
+    # === COOLDOWN CHECK ===
+    if attacker.cooldowns.get(talent.id, 0) > 0:
+        print(f"⏳ {talent.name} is on cooldown for {attacker.cooldowns[talent.id]} more turn(s).")
+        return 0, []
+
+    # Apply cooldown
+    if talent.cooldown > 0:
+        attacker.cooldowns[talent.id] = talent.cooldown + 1
+
+    print(f"\n🔷 {attacker.name} uses **{talent.name}**!")
+
+    total_damage = 0
+    all_reactions = []
+
+    for instance in talent.damage_instances:
+        allow_element = apply_icd(attacker, defender, instance)
+        effective_element = instance.element if allow_element else None
+
+        # Construct modified instance (non-destructive to talent base)
+        modified_instance = DamageInstance(
+            multiplier=instance.multiplier,
+            scaling_stat=instance.scaling_stat,
+            damage_type=instance.damage_type,
+            description=instance.description,
+            element=effective_element,
+            icd_tag=instance.icd_tag,
+            icd_interval=instance.icd_interval,
+        )
+
+        result = calculate_damage(attacker, defender, modified_instance)
+        damage = result["damage"]
+        actual = take_damage(defender, damage, source=attacker, team=[defender],
+                     summary=summary, taken_summary=taken_summary)
+        log_damage(
+            source=attacker,
+            target=defender,
+            amount=actual,
+            element=result["element"],
+            crit=result["crit"],
+            label=result["label"],
+            applied_element=result.get("applied_element", False)
+        )
+
+
+    # === ON-USE EFFECTS (Buffs, healing, summons, etc.) ===
+    for effect_fn in talent.on_use:
+        if callable(effect_fn):
+            result = effect_fn(attacker, defender, turn_manager)
+            if isinstance(result, tuple) and len(result) == 2:
+                extra_damage, extra_reactions = result
+                total_damage += extra_damage
+                all_reactions.extend(extra_reactions)
+
+    # === ENERGY COST ===
+    if energy_cost > 0:
+        attacker.energy_pool[energy_type] -= energy_cost
+
+    return total_damage, all_reactions
+
+battle_loop(player_team=[shinobu, yanfei, furina], enemy_team=[dummy])
