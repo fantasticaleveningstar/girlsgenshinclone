@@ -88,7 +88,7 @@ def action_advance(attacker, defender, turn_manager):
 
     return 0, []
 
-def use_normal_attack(attacker: Character, defender: Character, turn_manager: TurnManager):
+def use_normal_attack(attacker: Character, defender: Character, turn_manager: TurnManager, summary: dict = None, taken_summary: dict = None):
     attacks = attacker.get_active_normal_chain()
     if not attacks:
         print(f"{attacker.name} has no normal attacks.")
@@ -118,14 +118,14 @@ def use_normal_attack(attacker: Character, defender: Character, turn_manager: Tu
             additive_base_dmg_bonus=instance.additive_base_dmg_bonus,
         )
 
-        result = calculate_damage(attacker, defender, modified_instance)
+        result = calculate_damage(attacker, defender, modified_instance, turn_manager)
 
         damage = result["damage"]
-        reactions = result["reactions"]
         total_damage += damage
-        all_reactions.extend(reactions)
-
-        actual = take_damage(defender, damage, source=attacker, team=[defender])
+        all_reactions.extend(result["reactions"])
+        actual = take_damage(defender, damage, source=attacker, team=[defender],
+                     summary=summary, taken_summary=taken_summary)
+        
         log_damage(
             source=attacker,
             target=defender,
@@ -284,8 +284,9 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
 
         trigger_event("on_turn_start", [current_char], unit=current_char)
 
+        print(f"\n=========={current_char.name}'s Turn==========")
+
         if isinstance(current_char, Summon):
-            print(f"\n=========={current_char.name}'s Turn==========")
             if current_char.frozen:
                 print(f"{current_char.name} is frozen and cannot act!")
                 current_char.frozen = False
@@ -368,7 +369,6 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
                     damage, reactions = use_talent(current_char, target, action, turn_manager, summary=turn_damage_summary, taken_summary=turn_damage_taken)
                     take_damage(target, damage, source=current_char, team=player_team)
 
-
                     resolve_reactions(reactions, player_team)
 
                     reset_combo(current_char)  # Break combo
@@ -394,9 +394,9 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
                 print(f"{current_char.name} targets {target.name}!")
                 damage, reactions = use_talent(current_char, target, move, turn_manager)
                 take_damage(target, damage, source=current_char, team=player_team)
-
-
-                resolve_reactions(reactions, player_team)
+                print(f"[DEBUG] Final reactions to resolve: {reactions}")
+                for r in reactions:
+                    resolve_reactions([r], [r.target])
             else:
                 print(f"{current_char.name} has no skills to use and skips their turn.")
         current_char.decay_auras()
@@ -455,8 +455,9 @@ def use_talent(attacker: Character, defender: Character, talent: Talent, turn_ma
             icd_interval=instance.icd_interval,
         )
 
-        result = calculate_damage(attacker, defender, modified_instance)
+        result = calculate_damage(attacker, defender, modified_instance, turn_manager)
         damage = result["damage"]
+        all_reactions.extend(result["reactions"])
         actual = take_damage(defender, damage, source=attacker, team=[defender],
                      summary=summary, taken_summary=taken_summary)
         log_damage(

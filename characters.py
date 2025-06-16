@@ -515,9 +515,31 @@ rites_of_termination = Talent(
     cooldown=3
 )
 
+imaginary_confession = Talent(
+    name="Imaginary Confession",
+    description="Rosaria's skill.",
+    damage_instances=[
+        DamageInstance(multiplier=0.99,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.SKILL,
+                       element=Element.IMAGINARY,
+                       ),
+        DamageInstance(multiplier=2.31,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.SKILL,
+                       element=Element.IMAGINARY,
+                       )
+    ],
+    cooldown=1
+)
+
+
 rosaria.set_normal_attack_chain(church_spear)
 rosaria.add_talent(ravaging_confession, "skill")
+rosaria.add_talent(imaginary_confession, "skill")
 rosaria.add_talent(rites_of_termination, "burst")
+
+
 
 #end of list
 all_characters = [yanfei]

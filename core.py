@@ -1,7 +1,7 @@
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from collections import defaultdict
-from typing import Optional, Callable
+from collections import defaultdict, namedtuple
+from typing import Optional, Callable, Set
 import uuid
 
 class Element(Enum):
@@ -17,6 +17,34 @@ class Element(Enum):
     IMAGINARY = auto()
 
 NON_PERSISTENT_AURAS = {Element.ANEMO, Element.GEO, Element.QUANTUM, Element.PHYSICAL}
+ReactionInfo = namedtuple("ReactionInfo", ["elements", "aura_name", "faceup_element", "locked"])
+
+COMPOSITE_REACTIONS = {
+    frozenset({Element.ELECTRO, Element.DENDRO}): ReactionInfo(
+        elements={Element.ELECTRO, Element.DENDRO},
+        aura_name="Quicken",
+        faceup_element=Element.DENDRO,
+        locked=True
+    ),
+    frozenset({Element.CRYO, Element.DENDRO}): ReactionInfo(
+        elements={Element.CRYO, Element.DENDRO},
+        aura_name="Frost-Twined",
+        faceup_element=Element.DENDRO,
+        locked=True
+    ),
+    frozenset({Element.HYDRO, Element.CRYO}): ReactionInfo(
+        elements={Element.HYDRO, Element.CRYO},
+        aura_name="Frozen",
+        faceup_element=Element.CRYO,
+        locked=True
+    ),
+    frozenset({Element.CRYO, Element.IMAGINARY}): ReactionInfo(
+        elements={Element.CRYO, Element.IMAGINARY},
+        aura_name="Stasis",
+        faceup_element=Element.CRYO,
+        locked=True
+    ),
+}
 
 class DamageType(Enum):
     NORMAL_ATTACK = auto()
@@ -122,42 +150,40 @@ class Character(CombatUnit):
     def get_resistance(self, element: Element) -> float:
         return self.resistances.get(element, 0.1)
 
-    def apply_elemental_effect(self, element: Element, attacker: Optional['Character'] = None, icd_tag: str = None, icd_interval: int = 3, units: float = 1.0):
+    def apply_elemental_effect(self, element: Element, attacker: Optional['Character'] = None, units: float = 1.0):
+
+        for aura in self.auras:
+            if aura.locked:
+                if frozenset(aura.source_elements | {element}) == aura.source_elements:
+                    print(f"[DEBUG] {element.name} tried to interact with locked {aura.name}.")
+                    return
+                else:
+                    print(f"{element.name} hits locked {aura.name} aura. Defers to outer logic.")
+                    return
 
         current_elements = {aura.element for aura in self.auras if aura.units > 0}
 
-        if (element == Element.DENDRO and Element.ELECTRO in current_elements) or \
-            (element == Element.ELECTRO and Element.DENDRO in current_elements):
-            self.auras = [a for a in self.auras if a.element not in (Element.DENDRO, Element.ELECTRO)]
-            self.auras.append(Aura("Quicken", Element.DENDRO, units=1.0, locked=True))
-            print(f"{self.name} is now affected by Quicken.")
-            return
+        for existing_element in current_elements:
+            key = frozenset({existing_element, element})
+            if key in COMPOSITE_REACTIONS:
+                info = COMPOSITE_REACTIONS[key]
 
-        if (element == Element.HYDRO and Element.CRYO in current_elements) or \
-            (element == Element.CRYO and Element.HYDRO in current_elements):
-            self.auras = [a for a in self.auras if a.element not in (Element.HYDRO, Element.CRYO)]
-            self.auras.append(Aura("Frozen", Element.CRYO, units=1.0, locked=True))
-            print(f"{self.name} is now Frozen.")
-            return
-
-        if (element == Element.ELECTRO and Element.HYDRO in current_elements) or \
-            (element == Element.HYDRO and Element.ELECTRO in current_elements):
-            self.auras = [a for a in self.auras if a.element not in (Element.ELECTRO, Element.HYDRO)]
-            self.auras.append(Aura("Electro-Charged", Element.ELECTRO, units=1.0, locked=True))
-            print(f"{self.name} is now Electro-Charged.")
-            return
-
-        if (element == Element.CRYO and Element.DENDRO in current_elements) or \
-           (element == Element.DENDRO and Element.CRYO in current_elements):
-            self.auras = [a for a in self.auras if a.element not in (Element.CRYO, Element.DENDRO)]
-            self.auras.append(Aura("Frost-Twined", Element.CRYO, units=1.0, locked=True))
-            print(f"{self.name} is now Frost-Twined.")
-            return
+                # Remove contributing auras
+                self.auras = [a for a in self.auras if a.element not in key]
+                self.auras.append(Aura(
+                    name=info.aura_name,
+                    element=element,  # Default: second-applied element is face-up
+                    units=units,
+                    locked=info.locked,
+                    source_elements=key
+                ))
+                print(f"{self.name} is now affected by {info.aura_name}.")
+                return info.aura_name
 
         existing = next((a for a in self.auras if a.element == element), None)
 
         if element in NON_PERSISTENT_AURAS and not existing:
-            print(f"{element.name} is a non-persistent aura. Skipping.")
+            print(f"{element.name} is a non-persistent. Skipping.")
             return
 
         if existing:
@@ -170,8 +196,6 @@ class Character(CombatUnit):
         else:
             self.auras.append(Aura(name=element.name, element=element, units=units))
             print(f"{element.name} {units}U aura applied to {self.name}.")
-
-
 
     def decay_auras(self):
         remaining_auras = []
@@ -186,23 +210,27 @@ class Character(CombatUnit):
                 print(f"{aura.name} aura on {self.name} has expired.")
         self.auras = remaining_auras
 
+@dataclass
 class Aura:
-    def __init__(self, name: str, element: Element, units: float = 1.0, duration: int = 2, decay_rate: float = 0.5, source: Optional[Character] = None, locked: bool = False):
-        self.name = name
-        self.element = element
-        self.units = units
-        self.duration = duration
-        self.decay_rate = decay_rate
-        self.source = source
-        self.locked = locked
+    name: str
+    element: 'Element'  # Face-up element
+    units: float = 1.0
+    duration: int = 2
+    decay_rate: float = 0.5
+    source: Optional['Character'] = None
+    locked: bool = False
+    source_elements: Set['Element'] = field(default_factory=set)  # Used for composite reactions like Stasis
 
-    def decay(self):
+    def decay(self) -> bool:
         self.units = max(0.0, self.units - self.decay_rate)
         self.duration -= 1
         return self.is_expired()
 
-    def is_expired(self):
+    def is_expired(self) -> bool:
         return self.units <= 0.0 or self.duration <= 0
+    
+    def is_composite(self) -> bool:
+        return len(self.source_elements) > 1
 
 class DamageInstance:
     def __init__(self, multiplier: float, scaling_stat: StatType, damage_type: DamageType,

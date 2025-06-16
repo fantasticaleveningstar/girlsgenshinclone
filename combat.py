@@ -34,7 +34,7 @@ REACTION_AURA_CONSUMPTION = {
     "Bloom": 0.5,
     "Superposition": 2.0,
     "Rimegrass": 1.0,
-    "CryoImaginary": 1.0,
+    "Stasis": 1.0,
     # Add more if needed
 }
 
@@ -146,8 +146,8 @@ def calculate_res_multiplier(defender: Character, element: Element) -> float:
     else:
         return 1 / (4 * res + 1)
 
-def calculate_damage(attacker: Character, defender: Character, instance: DamageInstance):
-    turn_manager = TurnManager
+def calculate_damage(attacker: Character, defender: Character, instance: DamageInstance, turn_manager: TurnManager):
+    turn_manager = turn_manager
 
     base_stat = attacker.get_stat(instance.scaling_stat)
     base_damage = (base_stat * instance.multiplier * instance.base_dmg_multiplier)
@@ -172,18 +172,42 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
     reaction_hits = []
 
     applied_element = False
+    reaction = None
+    reaction_from_apply = None
     if effective_element:
+        if not hasattr(defender, "_just_applied_elements"):
+            defender._just_applied_elements = set()
+        defender._just_applied_elements.add(effective_element)
+        result = defender.apply_elemental_effect(
+                    element=effective_element,
+                    attacker=attacker,
+                    units=1.0
+            )
         applied_element = True
 
-        reaction, reacted_with = check_reaction(effective_element, defender.auras)
-        if reaction:
-            reaction_hits.extend(
-                resolve_reaction_effect(reaction, attacker, defender, turn_manager)
+        if isinstance(result, str):
+            reaction_from_apply = result
+            reaction = result
+            reacted_with = None
+        else:
+            reaction, reacted_with = check_reaction(
+                effective_element,
+                defender.auras,
+                just_applied_elements=defender._just_applied_elements
             )
+        print(f"[DEBUG] applying_elemental_effect returned: {reaction}")
+        if reaction:
+            if reaction == reaction_from_apply:
+                reaction_result_data = resolve_reaction_effect(reaction, attacker, defender, turn_manager)
+            else:
+                reaction_result_data = []
+            reaction_hit_exists = any(isinstance(r, ReactionHit) and is_transformative(r.reaction) for r in reaction_result_data)
+            reaction_hits.extend(reaction_result_data)
+
             emoji = REACTION_EMOJIS.get(reaction, "💥")
             print(f"{emoji} {reaction} triggered by {attacker.name}!")
 
-            if is_transformative(reaction):
+            if is_transformative(reaction) and not reaction_hit_exists:
                 reaction_result = calculate_transformative_damage(reaction, attacker)
                 reaction_hits.append(ReactionHit(
                     source=attacker,
@@ -208,16 +232,14 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
                 else:
                     reapplied = True
         
-        else:
-            reapplied = True
-        
-        if reapplied and effective_element:
-            defender.apply_elemental_effect(
-                element=effective_element,
-                attacker=attacker,
-                icd_tag=instance.icd_tag,
-                icd_interval=instance.icd_interval
-            )
+            else:
+                reapplied = True
+            
+            if not reapplied:
+                pass
+
+    if hasattr(defender, "_just_applied_elements"):
+        del defender._just_applied_elements
 
     total_damage = round(base_damage)
 
@@ -231,7 +253,7 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
     }
 
 def is_consuming_reaction(reaction: str) -> bool:
-    return reaction not in ("Quicken", "Aggravate", "Spread", "Frozen", "Electro-Charged", "Burning")
+    return reaction not in ("Quicken", "Aggravate", "Spread", "Frozen", "Electro-Charged", "Burning", "Stasis")
 
 def check_aggravate(attacker: Character, defender: Character, damage_element: Element):
     if damage_element != Element.ELECTRO:
@@ -290,7 +312,7 @@ def calculate_transformative_damage(reaction: str, attacker: Character) -> float
         element = Element.ANEMO
     elif reaction == "Shatter":
         element = Element.PHYSICAL
-    elif reaction == "CryoImaginary":
+    elif reaction == "Stasis":
         element = Element.IMAGINARY
     else:
         element = Element.PHYSICAL  # fallback
@@ -312,13 +334,13 @@ def get_transformative_multiplier(reaction: str) -> float:
         "Superconduct": 1.5,
         "Swirl": 0.6,
         "Burning": 0.6,
-        "CryoImaginary": 1.5,
+        "Stasis": 1.5,
     }.get(reaction, 1.0)
 
 def is_transformative(reaction: str) -> bool:
     return reaction in {
         "Overload", "Electro-Charged", "Superconduct",
-        "Swirl", "Bloom", "Hyperbloom", "Burgeon", "Burning", "CryoImaginary"
+        "Swirl", "Bloom", "Hyperbloom", "Burgeon", "Burning", "Stasis"
         }
 
 def is_amplifying(reaction: str) -> bool:
@@ -326,7 +348,9 @@ def is_amplifying(reaction: str) -> bool:
         "Forward Melt", "Forward Vaporize", "Reverse Melt", "Reverse Vaporize", "Superposition", 
         }
 
-def check_reaction(new_element: Element, existing_auras: list):
+def check_reaction(new_element: Element, existing_auras: list, just_applied_elements: Optional[set] = None):
+    if just_applied_elements is None:
+        just_applied_elements = set()
 
     reaction_table = {
         (Element.PYRO, Element.HYDRO): "Reverse Vaporize",
@@ -342,7 +366,7 @@ def check_reaction(new_element: Element, existing_auras: list):
         (Element.ELECTRO, Element.CRYO): "Superconduct",
         (Element.ELECTRO, Element.DENDRO): "Quicken",
         (Element.DENDRO, Element.ELECTRO): "Quicken",
-        (Element.CRYO, Element.IMAGINARY): "CryoImaginary",
+        (Element.CRYO, Element.IMAGINARY): "Stasis",
         # ... add others
     }
     
@@ -359,13 +383,30 @@ def check_reaction(new_element: Element, existing_auras: list):
         elif new_element == Element.DENDRO:
             print(f"Reaction Spread detected with existing Quicken and {new_element.name}")
             return "Spread", "Quicken"
-
     
     for aura in existing_auras:
-        reaction = reaction_table.get((new_element, aura.element)) or reaction_table.get((aura.element, new_element))
-        if reaction:
-            print(f"Reaction {reaction} detected between {new_element.name} and {aura.element.name}")
-            return reaction, aura
+        source_elements = getattr(aura, "source_elements", {aura.element})
+        for elem in source_elements:
+            reaction = reaction_table.get((new_element, elem)) or reaction_table.get((elem, new_element))
+            if reaction:
+                print(f"Reaction {reaction} detected between {new_element.name} and {elem.name}")
+                return reaction, aura
+    
+    for aura in existing_auras:
+        if aura.locked and hasattr(aura, "source_elements"):
+            elements = aura.source_elements
+            just_applied_elements = getattr(aura, "_just_applied_elements", getattr(aura, "_owner", None)._just_applied_elements if hasattr(aura, "_owner") else set())
+
+            # ✅ Only allow retrigger if BOTH elements were reapplied this frame
+            if elements.issubset(just_applied_elements):
+                for e1 in elements:
+                    for e2 in elements:
+                        if e1 == e2:
+                            continue
+                        if (e1, e2) in reaction_table or (e2, e1) in reaction_table:
+                            print(f"[DEBUG] Re-triggering {aura.name} with {e1.name} and {e2.name}")
+                            return aura.name, aura
+
     return None, None
 
 def reaction_effect(reaction: str, attacker: Character, defender: Character):
@@ -467,25 +508,41 @@ def resolve_reaction_effect(reaction: str, attacker: Character, defender: Charac
         defender.auras.append(aura)
         print(f"🌿❄️ {defender.name} is now Frost-Twined (x5 Cryo/Dendro multiplier)!")
 
-    elif reaction == "CryoImaginary":
-        cryo_aura = next((a for a in defender.auras if a.element == Element.CRYO), None)
-        units = cryo_aura.units if cryo_aura else 0
-        delay = 0.1 * units
-        if units >= 4:
-            delay += 0.3
-            damage = calculate_transformative_damage(reaction, attacker)
+    elif reaction == "Stasis":
+        imprisonment = None
+        # Find existing Stasis aura on defender
+        for aura in defender.auras:
+            if aura.name == "Stasis" and aura.element == Element.CRYO:
+                imprisonment = aura
+                break
+
+        if imprisonment is None:
+            # Add new Stasis aura if not found
+            imprisonment = Aura(element=Element.CRYO, name="Stasis", units=1.0, locked=True, source_elements={Element.CRYO, Element.IMAGINARY})
+            defender.auras.append(imprisonment)
+            print(f"Dummy is now affected by Stasis.")
+        else:
+            # Increase existing units
+            imprisonment.units += 1.0
+            print(f"🌀 {defender.name}'s Stasis aura increases to {imprisonment.units:.1f}U")
+
+        # Delay logic here
+        turn_manager.delay_by_percent(defender, 0.1 * 1.0)
+
+        if imprisonment.units >= 4:
+            damage = calculate_transformative_damage("Stasis", attacker)
             hits.append(ReactionHit(
                 source=attacker,
                 target=defender,
-                reaction=reaction,
-                damage=damage,
-                element=Element.IMAGINARY
+                reaction="Stasis",
+                damage=damage["damage"],
+                element=damage["element"]
             ))
-            print(f"✨❄️ Detonation! {defender.name} takes {damage} Imaginary DMG.")
-
-        turn_manager.delay_by_percent(defender, percent=delay)
-        print(f"⏱️ {defender.name}'s action delayed by {delay * 100:.0f}%")
-
+            print(f"✨❄️ Detonation! {defender.name} takes {damage['damage']} Imaginary DMG.")
+            turn_manager.delay_by_percent(defender, 0.3)
+            defender.auras.remove(imprisonment)
+    
+    print(f"[DEBUG] resolve_reaction_effect: triggering {reaction}")
     return hits
 
 def log_damage(source: Character, target: Character, amount: int,
