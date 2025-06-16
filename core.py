@@ -16,6 +16,8 @@ class Element(Enum):
     QUANTUM = auto()
     IMAGINARY = auto()
 
+NON_PERSISTENT_AURAS = {Element.ANEMO, Element.GEO, Element.QUANTUM, Element.PHYSICAL}
+
 class DamageType(Enum):
     NORMAL_ATTACK = auto()
     CHARGED_ATTACK = auto()
@@ -43,6 +45,10 @@ class CombatUnit:
 
     def get_speed(self):
         return max(1, getattr(self, "speed", 100))
+
+class ResistanceDict(defaultdict):
+    def __missing__(self, key):
+        return 0.1
 
 @dataclass(unsafe_hash=True)
 class Character(CombatUnit):
@@ -76,7 +82,7 @@ class Character(CombatUnit):
     type_bonuses: dict = field(default_factory=lambda: defaultdict(float), hash=False)
     general_dmg_bonus: float = 0.0
     dmg_reduction_taken: float = 0.0
-    resistances: dict = field(default_factory=lambda: defaultdict(float), hash=False)
+    resistances: dict = field(default_factory=ResistanceDict, hash=False)
     level: int = 90
 
     max_hp: int = field(init=False, hash=False)
@@ -112,6 +118,9 @@ class Character(CombatUnit):
 
     def set_form_locked_chain(self, form_name: str, chain):
         self.form_locked_normal_chains[form_name] = chain
+    
+    def get_resistance(self, element: Element) -> float:
+        return self.resistances.get(element, 0.1)
 
     def apply_elemental_effect(self, element: Element, attacker: Optional['Character'] = None, icd_tag: str = None, icd_interval: int = 3, units: float = 1.0):
 
@@ -147,6 +156,10 @@ class Character(CombatUnit):
 
         existing = next((a for a in self.auras if a.element == element), None)
 
+        if element in NON_PERSISTENT_AURAS and not existing:
+            print(f"{element.name} is a non-persistent aura. Skipping.")
+            return
+
         if existing:
             if existing.locked:
                 print(f"{self.name} already has a locked {element.name} aura. No new units applied.")
@@ -158,9 +171,7 @@ class Character(CombatUnit):
             self.auras.append(Aura(name=element.name, element=element, units=units))
             print(f"{element.name} {units}U aura applied to {self.name}.")
 
-        if element in NON_PERSISTENT_AURAS and not existing:
-            print(f"{element.name} is a non-persistent aura. Skipping.")
-            return
+
 
     def decay_auras(self):
         remaining_auras = []
@@ -192,8 +203,6 @@ class Aura:
 
     def is_expired(self):
         return self.units <= 0.0 or self.duration <= 0
-
-NON_PERSISTENT_AURAS = {Element.ANEMO, Element.GEO, Element.QUANTUM, Element.IMAGINARY, Element.PHYSICAL}
 
 class DamageInstance:
     def __init__(self, multiplier: float, scaling_stat: StatType, damage_type: DamageType,

@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
 from core import Character, Element, StatType, Talent, DamageInstance, DamageType, Summon, Passive, NormalAttackChain
-from combat import calculate_damage, apply_icd, salon_attack_action, summon_salon_members, notify_hp_change, take_damage, heal, notify_damage_taken, resolve_reactions, trigger_event, log_damage, log_heal
+from combat import calculate_damage, apply_icd, salon_attack_action, summon_salon_members, notify_hp_change, take_damage, heal, notify_damage_taken, resolve_reactions, trigger_event, log_damage, log_heal, get_living_allies
 from turn import TurnManager, Buff, BuffTimerUnit
-from characters import yanfei, shinobu, furina
+from characters import rosaria
 
 CAN_DOUBLE_AURA = {Element.HYDRO, Element.PYRO, Element.CRYO, Element.ELECTRO}
 
@@ -21,6 +21,8 @@ coexistence_rules = {
     Element.DENDRO: ["Quicken"],
     Element.ELECTRO: ["Quicken"],
     }
+
+player_team = []
 
 def grant_energy(regular=0, special_type=None, special_amount=0):
     def effect(attacker, *args, **kwargs):
@@ -34,9 +36,9 @@ def grant_energy(regular=0, special_type=None, special_amount=0):
 
 def apply_buff_trigger(character: Character, event: str):
     for buff in character.buffs:
-        if buff.trigger == event and not buff.applied:
+        if buff.trigger == event:
             if buff.effect:
-                buff.effect(character)
+                buff.effect(buff=buff, unit=character)
             elif buff.stat:  # fallback to stat buffs
                 bonus = character.base_stats[buff.stat] * buff.amount
                 character.stats[buff.stat] += bonus
@@ -145,7 +147,6 @@ def use_normal_attack(attacker: Character, defender: Character, turn_manager: Tu
 
     return total_damage, all_reactions, combo_complete
 
-
 def use_skill(attacker: Character, defender: Character, skill_index=0):
     reset_combo(attacker)  # Reset combo
     skill = attacker.skills[skill_index]
@@ -220,9 +221,15 @@ dummy = Character("Dummy",
                   base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 75}, element=Element.PYRO)
 
 def battle_loop(player_team: list[Character], enemy_team: list[Character]):
+    for unit in player_team:
+        unit.team = player_team
+    for unit in enemy_team:
+        unit.team = enemy_team
+
     all_characters = player_team + enemy_team
     turn_manager = TurnManager(all_characters)
     turn_manager.player_team_size = len(player_team)
+
 
     def is_alive(character):
         return character.current_hp > 0
@@ -236,23 +243,29 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
         turn_manager.preview_turn_order()
 
         current_char = turn_manager.next_turn()
+        trigger_event("on_turn_start", [current_char], unit=current_char)
 
         if isinstance(current_char, BuffTimerUnit):
             buff = current_char.buff
 
             # Apply effect if needed
-            trigger_event("on_buff_tick", [current_char.owner], buff=buff)
             buff.applied = True
 
 
+            buff.remaining_turns -= 1
+            print(f"[DEBUG] {buff.name} timer ticking on {current_char.owner.name} — {buff.remaining_turns} turns left")
+            print(f"[DEBUG] Active buffs on {current_char.owner.name}: {[b.name for b in current_char.owner.buffs]}")
             
             if buff.remaining_turns <= 0:
                 print(f"[Countdown] {buff.name} ticked. (0 turns remaining)")
                 print(f"[Countdown] {buff.name} has expired.")
                 if buff.cleanup_effect:
                     buff.cleanup_effect(current_char.owner)
-                if buff in current_char.owner.buffs:
-                    current_char.owner.buffs.remove(buff)
+                current_char.owner.buffs = [
+                b for b in current_char.owner.buffs
+                if not (b.name == buff.name and b.source == buff.source)
+            ]
+
 
                 # Remove timer unit
                 turn_manager.units.remove(current_char)
@@ -262,8 +275,7 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
                 ]
                 heapq.heapify(turn_manager.timeline)
             else:
-                print(f"[Countdown] {buff.name} ticked. ({buff.remaining_turns} turns remaining)")
-                buff.remaining_turns -= 1
+                print(f"[Countdown] {buff.name} ticked. ({buff.remaining_turns} turns remaining)")                
             continue
 
 
@@ -457,11 +469,12 @@ def use_talent(attacker: Character, defender: Character, talent: Talent, turn_ma
             applied_element=result.get("applied_element", False)
         )
 
+    allies = get_living_allies(attacker, turn_manager)
 
     # === ON-USE EFFECTS (Buffs, healing, summons, etc.) ===
     for effect_fn in talent.on_use:
         if callable(effect_fn):
-            result = effect_fn(attacker, defender, turn_manager)
+            result = effect_fn(attacker, defender, turn_manager, team=allies)
             if isinstance(result, tuple) and len(result) == 2:
                 extra_damage, extra_reactions = result
                 total_damage += extra_damage
@@ -473,4 +486,6 @@ def use_talent(attacker: Character, defender: Character, talent: Talent, turn_ma
 
     return total_damage, all_reactions
 
-battle_loop(player_team=[shinobu, yanfei, furina], enemy_team=[dummy])
+dummy.apply_elemental_effect(Element.IMAGINARY)
+
+battle_loop(player_team=[rosaria], enemy_team=[dummy])

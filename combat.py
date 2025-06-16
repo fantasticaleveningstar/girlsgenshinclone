@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
 from core import Character, Element, DamageInstance, StatType, Aura, Summon, DamageType
-from turn import TurnManager
+from turn import TurnManager, Buff
 from constants import ELEMENT_EMOJIS
 
 REACTION_EMOJIS = {
@@ -25,15 +25,16 @@ REACTION_EMOJIS = {
 
 REACTION_AURA_CONSUMPTION = {
     "Forward Melt": 2.0,
-    "Reverse Melt": 1.0,
+    "Reverse Melt": 0.5,
     "Forward Vaporize": 2.0,
-    "Reverse Vaporize": 1.0,
+    "Reverse Vaporize": 0.5,
     "Overload": 1.0,
     "Superconduct": 1.0,
     "Burning": 0.5,
     "Bloom": 0.5,
     "Superposition": 2.0,
     "Rimegrass": 1.0,
+    "CryoImaginary": 1.0,
     # Add more if needed
 }
 
@@ -42,6 +43,7 @@ class TextColor:
     BOLD = "\033[1m"
     GRAY = "\033[90m"
     WHITE = "\033[97m"
+    HEAL = "\033[38;2;149;224;33m"
 
 ELEMENT_COLORS = {
     Element.PYRO: "\033[38;2;255;102;64m",
@@ -84,7 +86,9 @@ class ICDTracker:
             return False
 
 def notify_hp_change(unit: Character, old_hp: int, new_hp: int, team: list[Character]):
-    trigger_event("on_hp_change", team, unit=unit, old_hp=old_hp, new_hp=new_hp)
+    diff = abs(new_hp - old_hp)
+    if diff > 0:
+        trigger_event("on_hp_change", team, unit=unit, old_hp=old_hp, new_hp=new_hp)
 
 def heal(target: Character, amount: int, source: Optional[Character] = None, team: Optional[list[Character]] = None):
     if team is None:
@@ -118,11 +122,13 @@ def take_damage(target: Character, amount: int, source: Optional[Character] = No
     return amount
 
 def calculate_dmg_bonus(attacker: Character, instance: DamageInstance) -> float:
-    base = attacker.general_dmg_bonus
-    base += attacker.elemental_bonuses.get(instance.element, 0.0)
-    base += attacker.type_bonuses.get(instance.damage_type, 0.0)
+    bonus = 0.0
+
+    bonus += attacker.general_dmg_bonus
+    bonus += attacker.elemental_bonuses.get(instance.element, 0.0)
+    bonus += attacker.type_bonuses.get(instance.damage_type, 0.0)
     # TODO: conditional bonuses, e.g., vs frozen, HP thresholds, buffs
-    return base
+    return bonus
 
 def calculate_def_multiplier(attacker: Character, defender: Character, def_shred: float = 0.0):
     atk_level = getattr(attacker, "level", 90)
@@ -130,8 +136,8 @@ def calculate_def_multiplier(attacker: Character, defender: Character, def_shred
     def_multiplier = (atk_level + 100) / ((atk_level + 100) + (def_level + 100) * (1 - def_shred))
     return def_multiplier
 
-def calculate_res_multiplier(defender: Character, element: Element):
-    res = defender.resistances.get(element, 0.1)  # Default to 10% res
+def calculate_res_multiplier(defender: Character, element: Element) -> float:
+    res = defender.resistances[element]  # Default to 10% res
 
     if res < 0:
         return 1 - (res / 2)
@@ -141,6 +147,8 @@ def calculate_res_multiplier(defender: Character, element: Element):
         return 1 / (4 * res + 1)
 
 def calculate_damage(attacker: Character, defender: Character, instance: DamageInstance):
+    turn_manager = TurnManager
+
     base_stat = attacker.get_stat(instance.scaling_stat)
     base_damage = (base_stat * instance.multiplier * instance.base_dmg_multiplier)
     base_damage += instance.additive_base_dmg_bonus
@@ -166,15 +174,12 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
     applied_element = False
     if effective_element:
         applied_element = True
-        defender.apply_elemental_effect(
-            element=effective_element,
-            attacker=attacker,
-            icd_tag=instance.icd_tag,
-            icd_interval=instance.icd_interval
-        )
 
         reaction, reacted_with = check_reaction(effective_element, defender.auras)
         if reaction:
+            reaction_hits.extend(
+                resolve_reaction_effect(reaction, attacker, defender, turn_manager)
+            )
             emoji = REACTION_EMOJIS.get(reaction, "💥")
             print(f"{emoji} {reaction} triggered by {attacker.name}!")
 
@@ -199,6 +204,20 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
             if is_consuming_reaction(reaction) and reacted_with in defender.auras:
                 if isinstance(reacted_with, Aura):
                     consume_aura_units(defender, reacted_with.element, reaction=reaction)
+                    reapplied = False
+                else:
+                    reapplied = True
+        
+        else:
+            reapplied = True
+        
+        if reapplied and effective_element:
+            defender.apply_elemental_effect(
+                element=effective_element,
+                attacker=attacker,
+                icd_tag=instance.icd_tag,
+                icd_interval=instance.icd_interval
+            )
 
     total_damage = round(base_damage)
 
@@ -271,6 +290,8 @@ def calculate_transformative_damage(reaction: str, attacker: Character) -> float
         element = Element.ANEMO
     elif reaction == "Shatter":
         element = Element.PHYSICAL
+    elif reaction == "CryoImaginary":
+        element = Element.IMAGINARY
     else:
         element = Element.PHYSICAL  # fallback
 
@@ -291,12 +312,13 @@ def get_transformative_multiplier(reaction: str) -> float:
         "Superconduct": 1.5,
         "Swirl": 0.6,
         "Burning": 0.6,
+        "CryoImaginary": 1.5,
     }.get(reaction, 1.0)
 
 def is_transformative(reaction: str) -> bool:
     return reaction in {
         "Overload", "Electro-Charged", "Superconduct",
-        "Swirl", "Bloom", "Hyperbloom", "Burgeon", "Burning"
+        "Swirl", "Bloom", "Hyperbloom", "Burgeon", "Burning", "CryoImaginary"
         }
 
 def is_amplifying(reaction: str) -> bool:
@@ -320,6 +342,7 @@ def check_reaction(new_element: Element, existing_auras: list):
         (Element.ELECTRO, Element.CRYO): "Superconduct",
         (Element.ELECTRO, Element.DENDRO): "Quicken",
         (Element.DENDRO, Element.ELECTRO): "Quicken",
+        (Element.CRYO, Element.IMAGINARY): "CryoImaginary",
         # ... add others
     }
     
@@ -388,7 +411,8 @@ def trigger_event(event_name: str, team: list[Character], **kwargs):
         # Passives
         for passive in getattr(unit, "passives", []):
             if passive.trigger == event_name:
-                passive.effect(observer=unit, **kwargs)
+                kwargs["observer"] = unit
+                passive.effect(**kwargs)
 
         # Buffs
         for buff in getattr(unit, "buffs", []):
@@ -417,6 +441,52 @@ def resolve_reactions(reactions: list, team: list[Character]):
             is_reaction=True,
             applied_element=True
         )
+
+def resolve_reaction_effect(reaction: str, attacker: Character, defender: Character, turn_manager: TurnManager) -> list[ReactionHit]:
+    hits = []
+    def apply_superconduct(unit, **kwargs):
+        unit.resistances[Element.PHYSICAL] -= 0.4
+
+    def remove_superconduct(unit):
+        unit.resistances[Element.PHYSICAL] += 0.4
+
+    if reaction == "Superconduct":
+        debuff = Buff(
+            name="Superconduct",
+            description="-40% Physical RES",
+            duration=2,
+            reversible=True,
+            effect=apply_superconduct,
+            cleanup_effect=remove_superconduct,
+        )
+        defender.buffs.append(debuff)
+        print(f"🧊⚡ {defender.name} is affected by Superconduct (−40% Physical RES)!")
+
+    elif reaction == "Rimegrass":
+        aura = Aura(element=Element.CRYO, name="Frost-Twined", units=5)
+        defender.auras.append(aura)
+        print(f"🌿❄️ {defender.name} is now Frost-Twined (x5 Cryo/Dendro multiplier)!")
+
+    elif reaction == "CryoImaginary":
+        cryo_aura = next((a for a in defender.auras if a.element == Element.CRYO), None)
+        units = cryo_aura.units if cryo_aura else 0
+        delay = 0.1 * units
+        if units >= 4:
+            delay += 0.3
+            damage = calculate_transformative_damage(reaction, attacker)
+            hits.append(ReactionHit(
+                source=attacker,
+                target=defender,
+                reaction=reaction,
+                damage=damage,
+                element=Element.IMAGINARY
+            ))
+            print(f"✨❄️ Detonation! {defender.name} takes {damage} Imaginary DMG.")
+
+        turn_manager.delay_by_percent(defender, percent=delay)
+        print(f"⏱️ {defender.name}'s action delayed by {delay * 100:.0f}%")
+
+    return hits
 
 def log_damage(source: Character, target: Character, amount: int,
                element: Optional[Element] = None,
@@ -451,7 +521,7 @@ def log_damage(source: Character, target: Character, amount: int,
 def log_heal(source: Character, target: Character, amount: int):
     start = target.current_hp - amount
     end = target.current_hp
-    print(f"[HEAL] 🩹 {source.name} heals {target.name} for {TextColor.GREEN}{amount:,}{TextColor.RESET} HP "
+    print(f"[HEAL] 🩹 {source.name} heals {target.name} for {TextColor.HEAL}{amount:,}{TextColor.RESET} HP "
           f"{TextColor.GRAY}(HP: {start:,} → {end:,}){TextColor.RESET}")
 
 def get_allies(attacker: Character, turn_manager: TurnManager) -> list[Character]:
@@ -461,19 +531,42 @@ def get_allies(attacker: Character, turn_manager: TurnManager) -> list[Character
         and is_same_team(attacker, unit, turn_manager)
     ]
 
+def get_enemies(attacker: Character, turn_manager: TurnManager) -> list[Character]:
+    return [
+        unit for unit in turn_manager.units
+        if isinstance(unit, Character)
+        and not is_same_team(attacker, unit, turn_manager)
+    ]
+
 def is_same_team(char1: Character, char2: Character, turn_manager: TurnManager) -> bool:
-    team_cutoff = len([u for u in turn_manager.units if isinstance(u, Character)]) // 2
-    char_units = [u for u in turn_manager.units if isinstance(u, Character)]
-    if char1 not in char_units or char2 not in char_units:
-        return False
-    return char_units.index(char1) < team_cutoff and char_units.index(char2) < team_cutoff \
-        or char_units.index(char1) >= team_cutoff and char_units.index(char2) >= team_cutoff
+    chars = [u for u in turn_manager.units if isinstance(u, Character)]
+    cutoff = getattr(turn_manager, "player_team_size", len(chars) // 2)
+
+    try:
+        idx1 = chars.index(char1)
+        idx2 = chars.index(char2)
+    except ValueError:
+        return False  # One or both chars no longer in list
+
+    return (idx1 < cutoff and idx2 < cutoff) or (idx1 >= cutoff and idx2 >= cutoff)
 
 def get_teams(turn_manager):
     """Splits characters into two teams using stored player_team_size."""
     chars = [u for u in turn_manager.units if isinstance(u, Character)]
     size = getattr(turn_manager, "player_team_size", len(chars) // 2)
     return chars[:size], chars[size:]
+
+def get_living_allies(attacker: Character, turn_manager: TurnManager) -> list[Character]:
+    return [
+        ally for ally in get_allies(attacker, turn_manager)
+        if isinstance(ally, Character) and ally.current_hp > 0
+    ]
+
+def get_living_enemies(attacker: Character, turn_manager: TurnManager) -> list[Character]:
+    return [
+        enemy for enemy in get_enemies(attacker, turn_manager)
+        if isinstance(enemy, Character) and enemy.current_hp > 0
+    ]
 
 #character-specific
 
@@ -495,6 +588,7 @@ def salon_attack_action(summon: 'Summon', enemy_team: list[Character]):
         if ally.current_hp > min_allowed:
             drain_amount = min(ally.current_hp - min_allowed, ally.max_hp * base_drain)
             ally.current_hp -= drain_amount
+            notify_hp_change(ally, old_hp=ally.current_hp + drain_amount, new_hp=ally.current_hp, team=summon.owner_team)
             drained_allies += 1
             print(f"{summon.name} drains {drain_amount:.0f} HP from {ally.name}.")
 
@@ -543,7 +637,7 @@ def salon_attack_action(summon: 'Summon', enemy_team: list[Character]):
             applied_element=True
         )
 
-def summon_salon_members(attacker: Character, defender: Character, turn_manager: TurnManager):
+def summon_salon_members(attacker: Character, defender: Character, turn_manager: TurnManager, **kwargs):
     attacker.summon_turn_counter = 3
 
     team1, team2 = get_teams(turn_manager)

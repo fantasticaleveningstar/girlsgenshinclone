@@ -6,9 +6,9 @@ import uuid
 from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
-from core import Character, StatType, Element, DamageInstance, DamageType, Talent, NormalAttackChain, Summon
+from core import Character, StatType, Element, DamageInstance, DamageType, Talent, NormalAttackChain, Passive
 from turn import TurnManager, Buff
-from combat import summon_salon_members
+from combat import summon_salon_members, heal, get_allies
 
 #yanfei core
 yanfei = Character("Yanfei",
@@ -113,10 +113,10 @@ shinobu = Character("Shinobu",
                        },
                        element=Element.ELECTRO)
                     
-def shinobu_heal(attacker, _, __):
+def shinobu_heal(attacker: Character, defender: Character, turn_manager: TurnManager, **kwargs):
     heal_amount = int(0.15 * attacker.get_stat(StatType.HP))
-    attacker.current_hp = min(attacker.max_hp, attacker.current_hp + heal_amount)
-    print(f"{attacker.name} heals for {heal_amount} HP after using skill.")
+    team = kwargs.get("team", [])
+    actual = heal(target=attacker, amount=heal_amount, source=attacker, team=team)
     return 0, []
 
 kariyama_rite = Talent(
@@ -189,7 +189,7 @@ soloists_solicitation = NormalAttackChain(
                     scaling_stat=StatType.ATK,
                     damage_type=DamageType.NORMAL_ATTACK,
                     element=Element.PHYSICAL,
-                    tag="Yanfei Normal Attack",
+                    tag="Furina Normal Attack",
                     icd_interval=3)
             ]
                 ),
@@ -250,49 +250,101 @@ salon_solitaire = Talent(
     on_use=summon_salon_members,
 )
 
+furina.fanfare_points = 0
+
 def gain_fanfare_from_hp_change(observer: Character, unit: Character, old_hp: int, new_hp: int):
-    if not hasattr(observer, "fanfare_points"):
+    if not hasattr(observer, "fanfare_points") or not getattr(observer, "revelry_active", False):
         return
 
-    max_hp = unit.max_hp
+    # Only gain fanfare if the party-wide duration buff is active
+    active_timer = getattr(observer, "revelry_timer", None)
+    if not active_timer or active_timer.remaining_turns <= 0:
+        return
+
+    if unit.current_hp <= 0 or unit.max_hp == 0:
+        return
+
     delta = abs(new_hp - old_hp)
-    percent_change = (delta / max_hp) * 100
+    percent_change = (delta / unit.max_hp) * 100
     points_gained = int(percent_change)
 
     if points_gained > 0:
         observer.fanfare_points += points_gained
         print(f"{observer.name} gains {points_gained} Fanfare (total: {observer.fanfare_points}) from {unit.name}'s HP change.")
+        refresh_universal_revelry_bonuses(observer)
 
-def update_party_revelry_bonuses(buff: Buff, unit: Character):
+def update_party_revelry_bonuses(buff: Buff, unit: Character, **kwargs):
     source = buff.source
     if not hasattr(source, "fanfare_points"):
+        print(f"[DEBUG] {unit.name} → missing source fanfare.")
         return
 
-    bonus_pct = source.fanfare_points * 0.0023  # Example: +0.03% per point
-    healing_bonus = source.fanfare_points * 0.0009  # Example: +0.04% per point
-    unit.general_dmg_bonus += bonus_pct
+    bonus_pct = source.fanfare_points * 0.0023  
+    healing_bonus = source.fanfare_points * 0.0009 
+    unit.general_dmg_bonus = bonus_pct
     print(f"{unit.name} receives {bonus_pct*100:.1f}% DMG bonus from Universal Revelry.")
 
-def apply_universal_revelry(attacker: Character, defender: Character, turn_manager: TurnManager, **kwargs):
-    attacker.fanfare_points = 0  # start from 0
-    duration = 3
-    team = kwargs.get("team", [])
+def refresh_universal_revelry_bonuses(furina: Character):
+    print(f"[DEBUG] refresh_universal_revelry_bonuses called for {furina.name}")
+    if not getattr(furina, "revelry_active", False):
+        return
 
-    for ally in turn_manager.units:
-        if isinstance(ally, Character):
-            buff = Buff(
-                name="Universal Revelry",
-                description="Scales party DMG and healing based on Furina’s Fanfare.",
-                duration=duration,
-                trigger="on_turn_start",  # will be refreshed per turn
-                source=attacker,
-                reversible=True,
-                effect=update_party_revelry_bonuses,
-                cleanup_effect=lambda char: setattr(attacker, "fanfare_points", 0)
-            )
-            ally.buffs.append(buff)
-            turn_manager.add_buff_timer(buff, ally)
-            print(f"{ally.name} is empowered by Universal Revelry.")
+    for unit in getattr(furina, "revelry_units", []):
+        for buff in unit.buffs:
+            if buff.name == "Universal Revelry" and buff.source == furina:
+                update_party_revelry_bonuses(buff, unit)
+
+def expire_universal_revelry(furina: Character):
+    print(f"Universal Revelry has expired.")
+
+    for unit in getattr(furina, "revelry_units", []):
+        unit.buffs = [b for b in unit.buffs if not (b.name == "Universal Revelry" and b.source == furina)]
+        unit.general_dmg_bonus = 0
+
+    furina.fanfare_points = 0
+    furina.revelry_active = False
+
+def apply_universal_revelry(attacker: Character, defender: Character, turn_manager, team: list[Character]):
+    print(f"{attacker.name} activates Universal Revelry!")
+
+    attacker.fanfare_points = 0  # Reset fanfare
+    attacker.revelry_units = []  # Track affected allies
+    attacker.revelry_active = True
+
+    # Manually apply the buff to each teammate
+    for unit in team:
+        if unit.current_hp <= 0:
+            continue
+
+        unit.buffs = [b for b in unit.buffs if not (b.name == "Universal Revelry" and b.source == attacker)]
+
+        buff = Buff(
+            name="Universal Revelry",
+            description="Gain DMG and Healing Bonus based on Fanfare.",
+            duration=3,
+            trigger="on_turn_start",
+            source=attacker,
+            effect=update_party_revelry_bonuses,
+            cleanup_effect=lambda char: setattr(char, "general_dmg_bonus", 0),
+            reversible=True
+        )
+
+        unit.buffs.append(buff)
+        attacker.revelry_units.append(unit)
+
+    # Add shared timer
+    duration_buff = Buff(
+        name="Universal Revelry Duration",
+        description="Party-wide timer for Universal Revelry.",
+        duration=3,
+        source=attacker,
+        reversible=False,
+        trigger="on_turn_start",
+        effect=None,
+        cleanup_effect=expire_universal_revelry
+    )
+    attacker.revelry_timer = duration_buff
+    turn_manager.add_buff_timer(duration_buff, attacker)
 
     return 0, []
 
@@ -310,9 +362,162 @@ people_rejoice = Talent(
     on_use=apply_universal_revelry
 )
 
+fanfare_tracker = Passive(
+    name="Fanfare Tracker",
+    description="Gain Fanfare when party HP changes.",
+    trigger="on_hp_change",
+    effect=gain_fanfare_from_hp_change
+)
+
 furina.set_normal_attack_chain(soloists_solicitation)
 furina.add_talent(salon_solitaire, "skill")
 furina.add_talent(people_rejoice, "burst")
+furina.add_passive(fanfare_tracker)
+
+#rosaria core
+rosaria = Character("Rosaria",
+                   base_stats={
+                       StatType.ATK: 2400,
+                       StatType.DEF: 900,
+                       StatType.HP: 18000,
+                       StatType.SPD: 120,
+                       StatType.CRIT_RATE: 1,
+                       StatType.CRIT_DMG: 1.8,
+                       StatType.EM: 200,
+                       StatType.ENERGY_RECHARGE: 1.0,
+                       },
+                       element=Element.CRYO
+                   )
+
+church_spear = NormalAttackChain(
+    name="Spear of the Church",
+    talents=[
+        Talent(
+            name="Spear of the Church N1",
+            description="Rosaria N1",
+            damage_instances=[
+                DamageInstance(
+                    multiplier=0.964,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Rosaria Normal Attack",
+                    icd_interval=3)
+            ]
+                ),
+        Talent(
+            name="Spear of the Church N2",
+            description="Rosaria N2",
+            damage_instances=[
+                DamageInstance(
+                    multiplier=0.948,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Rosaria Normal Attack",
+                    icd_interval=3)
+            ]
+                ),
+        Talent(
+            name="Spear of the Church N3",
+            description="Rosaria N3",
+            damage_instances=[
+                DamageInstance(
+                    multiplier=0.585,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Rosaria Normal Attack",
+                    icd_interval=3),
+                DamageInstance(
+                    multiplier=0.585,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Rosaria Normal Attack",
+                    icd_interval=3)
+            ]
+                ),
+        Talent(
+            name="Spear of the Church N4",
+            description="Rosaria N4",
+            damage_instances=[
+                DamageInstance(
+                    multiplier=1.38,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Rosaria Normal Attack",
+                    icd_interval=3)
+            ]
+                ),
+        Talent(
+            name="Spear of the Church N5",
+            description="Rosaria N5",
+            damage_instances=[
+                DamageInstance(
+                    multiplier=0.765,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Rosaria Normal Attack",
+                    icd_interval=3),
+                DamageInstance(
+                    multiplier=0.9,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Rosaria Normal Attack",
+                    icd_interval=3),
+            ]
+                ),
+        ]
+)
+
+ravaging_confession = Talent(
+    name="Ravaging Confession",
+    description="Rosaria's skill.",
+    damage_instances=[
+        DamageInstance(multiplier=0.99,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.SKILL,
+                       element=Element.CRYO,
+                       ),
+        DamageInstance(multiplier=2.31,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.SKILL,
+                       element=Element.CRYO,
+                       )
+    ],
+    cooldown=1
+)
+
+rites_of_termination = Talent(
+    name="Rites of Termination",
+    description="Rosaria's burst.",
+    damage_instances=[
+        DamageInstance(multiplier=1.77,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.BURST,
+                       element=Element.CRYO,
+                       ),
+        DamageInstance(multiplier=2.58,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.BURST,
+                       element=Element.CRYO,
+                       ),
+        DamageInstance(multiplier=2.24,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.BURST,
+                       element=Element.CRYO,
+                       ),
+    ],
+    cooldown=3
+)
+
+rosaria.set_normal_attack_chain(church_spear)
+rosaria.add_talent(ravaging_confession, "skill")
+rosaria.add_talent(rites_of_termination, "burst")
 
 #end of list
 all_characters = [yanfei]

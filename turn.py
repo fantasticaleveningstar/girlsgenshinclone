@@ -45,6 +45,7 @@ class TurnManager:
         self.time = 0
         self.buff_timers = []
         self.units = list(characters)
+        self.player_team_size = len([c for c in characters if isinstance(c, Character)]) // 2
 
         for char in characters:
             speed = char.get_stat(StatType.SPD)
