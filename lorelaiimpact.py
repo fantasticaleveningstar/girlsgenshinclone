@@ -9,7 +9,7 @@ from typing import Optional, Callable
 from core import Character, Element, StatType, Talent, DamageInstance, DamageType, Summon, Passive, NormalAttackChain
 from combat import calculate_damage, apply_icd, salon_attack_action, summon_salon_members, notify_hp_change, take_damage, heal, notify_damage_taken, resolve_reactions, trigger_event, log_damage, log_heal, get_living_allies
 from turn import TurnManager, Buff, BuffTimerUnit
-from characters import rosaria
+from characters import gaming
 
 CAN_DOUBLE_AURA = {Element.HYDRO, Element.PYRO, Element.CRYO, Element.ELECTRO}
 
@@ -487,6 +487,6 @@ def use_talent(attacker: Character, defender: Character, talent: Talent, turn_ma
 
     return total_damage, all_reactions
 
-dummy.apply_elemental_effect(Element.IMAGINARY)
+dummy.apply_elemental_effect(Element.DENDRO)
 
-battle_loop(player_team=[rosaria], enemy_team=[dummy])
+battle_loop(player_team=[gaming], enemy_team=[dummy])

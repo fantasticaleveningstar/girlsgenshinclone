@@ -481,12 +481,12 @@ ravaging_confession = Talent(
         DamageInstance(multiplier=0.99,
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
-                       element=Element.PYRO,
+                       element=Element.CRYO,
                        ),
         DamageInstance(multiplier=2.31,
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
-                       element=Element.PYRO,
+                       element=Element.CRYO,
                        )
     ],
     cooldown=1
@@ -515,30 +515,123 @@ rites_of_termination = Talent(
     cooldown=3
 )
 
-imaginary_confession = Talent(
-    name="Imaginary Confession",
-    description="Rosaria's skill.",
-    damage_instances=[
-        DamageInstance(multiplier=0.99,
-                       scaling_stat=StatType.ATK,
-                       damage_type=DamageType.SKILL,
-                       element=Element.IMAGINARY,
-                       ),
-        DamageInstance(multiplier=2.31,
-                       scaling_stat=StatType.ATK,
-                       damage_type=DamageType.SKILL,
-                       element=Element.IMAGINARY,
-                       )
-    ],
-    cooldown=1
-)
-
 rosaria.set_normal_attack_chain(church_spear)
 rosaria.add_talent(ravaging_confession, "skill")
-rosaria.add_talent(imaginary_confession, "skill")
 rosaria.add_talent(rites_of_termination, "burst")
 
+#gaming core
+gaming = Character("Gaming",
+                   base_stats={
+                       StatType.ATK: 1600,
+                       StatType.DEF: 900,
+                       StatType.HP: 18000,
+                       StatType.SPD: 130,
+                       StatType.CRIT_RATE: 1,
+                       StatType.CRIT_DMG: 1.8,
+                       StatType.EM: 300,
+                       StatType.ENERGY_RECHARGE: 1.0,
+                       },
+                       element=Element.QUANTUM
+                   )
 
+stellar_rend = NormalAttackChain(
+    name="Stellar Rend",
+    talents=[
+        Talent(
+            name="Stellar Rend N1",
+            description="Gaming N1",
+            damage_instances=[
+                DamageInstance(
+                    multiplier=1.541,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Gaming Normal Attack",
+                    icd_interval=3)
+            ]
+                ),
+        Talent(
+            name="Stellar Rend N2",
+            description="Gaming N2",
+            damage_instances=[
+                DamageInstance(
+                    multiplier=1.452,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Gaming Normal Attack",
+                    icd_interval=3)
+            ]
+                ),
+        Talent(
+            name="Stellar Rend N3",
+            description="Gaming N3",
+            damage_instances=[
+                DamageInstance(
+                    multiplier=1.959,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Gaming Normal Attack",
+                    icd_interval=3)
+            ]
+                ),
+        Talent(
+            name="Stellar Rend N4",
+            description="Gaming N4",
+            damage_instances=[
+                DamageInstance(
+                    multiplier=1.38,
+                    scaling_stat=StatType.ATK,
+                    damage_type=DamageType.NORMAL_ATTACK,
+                    element=Element.PHYSICAL,
+                    tag="Gaming Normal Attack",
+                    icd_interval=3)
+            ]
+                ),
+        ]
+)
+
+bestial_ascent = Talent(
+    name="Bestial Ascent",
+    description="Gaming Skill",
+    damage_instances=[
+        DamageInstance(multiplier=3.917,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.SKILL,
+                       element=Element.QUANTUM,
+                       )
+    ]
+)
+
+aura_app = Talent(
+    name="Electro App",
+    description="Gaming Skill",
+    damage_instances=[
+        DamageInstance(multiplier=3.917,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.SKILL,
+                       element=Element.ELECTRO,
+                       )
+    ]
+)
+
+suanni_dance = Talent(
+    name="Suanni's Gilded Dance",
+    description="Gaming Burst",
+    damage_instances=[
+        DamageInstance(multiplier=6.297,
+                       scaling_stat=StatType.ATK,
+                       damage_type=DamageType.SKILL,
+                       element=Element.QUANTUM,
+                       )
+    ]
+)
+
+gaming.set_normal_attack_chain(stellar_rend)
+gaming.add_talent(bestial_ascent, "skill")
+gaming.add_talent(aura_app, "skill")
+gaming.add_talent(suanni_dance, "burst")
 
 #end of list
 all_characters = [yanfei]

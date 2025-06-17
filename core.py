@@ -16,6 +16,14 @@ class Element(Enum):
     QUANTUM = auto()
     IMAGINARY = auto()
 
+class AuraTag(Enum):
+    QUICKEN = auto()
+    FROZEN = auto()
+    BURNING = auto()
+    ELECTRO_CHARGED = auto()
+    RIMEGRASS = auto()
+    # You can add others here
+
 NON_PERSISTENT_AURAS = {Element.ANEMO, Element.GEO, Element.QUANTUM, Element.PHYSICAL}
 
 @dataclass
@@ -27,63 +35,42 @@ class ReactionInfo:
     locked: bool = False
     default_units: float = 1.0
 
-COMPOSITE_REACTIONS = {
-    frozenset({Element.ELECTRO, Element.DENDRO}): ReactionInfo(
-        elements={Element.ELECTRO, Element.DENDRO},
-        aura_name="Quicken",
-        reaction_name="Quicken",
-        faceup_element=Element.DENDRO,
-        locked=True,
-        default_units=1.0
-    ),
-    frozenset({Element.CRYO, Element.DENDRO}): ReactionInfo(
-        elements={Element.CRYO, Element.DENDRO},
-        aura_name="Rimegrass",
-        reaction_name="Rimegrass",
-        faceup_element=Element.DENDRO,
-        locked=True,
-        default_units=1.0
-    ),
-    frozenset({Element.HYDRO, Element.CRYO}): ReactionInfo(
-        elements={Element.HYDRO, Element.CRYO},
-        aura_name="Frozen",
-        reaction_name="Frozen",
-        faceup_element=Element.CRYO,
-        locked=True,
-        default_units=1.0
-    ),
-    frozenset({Element.CRYO, Element.IMAGINARY}): ReactionInfo(
-        elements={Element.CRYO, Element.IMAGINARY},
-        aura_name=None,
-        reaction_name="Stasis",
-        faceup_element=Element.CRYO,
-        locked=False,
-        default_units=0
-    ),
-    frozenset({Element.PYRO, Element.IMAGINARY}): ReactionInfo(
-        elements={Element.PYRO, Element.IMAGINARY},
-        aura_name=None,
-        reaction_name="Ignition",
-        faceup_element=Element.CRYO,
-        locked=False,
-        default_units=0
-    ),
-    frozenset({Element.HYDRO, Element.IMAGINARY}): ReactionInfo(
-        elements={Element.HYDRO, Element.IMAGINARY},
-        aura_name=None,
-        reaction_name="Anchor",
-        faceup_element=Element.CRYO,
-        locked=False,
-        default_units=0
-    ),
-    frozenset({Element.ELECTRO, Element.IMAGINARY}): ReactionInfo(
-        elements={Element.ELECTRO, Element.IMAGINARY},
-        aura_name=None,
-        reaction_name="Impulse",
-        faceup_element=Element.CRYO,
-        locked=False,
-        default_units=0
-    ),
+REACTIONS_WITH_AURA = {
+    frozenset({Element.DENDRO, Element.ELECTRO}): {
+        "reaction_name": "Quicken",
+        "aura_element": Element.DENDRO,
+        "aura_name": "Quicken",
+        "locked": True,
+        "units": 1.0,
+    },
+    frozenset({Element.HYDRO, Element.CRYO}): {
+        "reaction_name": "Frozen",
+        "aura_element": Element.CRYO,
+        "aura_name": "Frozen",
+        "locked": True,
+        "units": 1.0,
+    },
+    frozenset({Element.ELECTRO, Element.HYDRO}): {
+        "reaction_name": "Electro-Charged",
+        "aura_element": Element.ELECTRO,
+        "aura_name": "Electro-Charged",
+        "locked": True,
+        "units": 1.0,
+    },
+    frozenset({Element.DENDRO, Element.PYRO}): {
+        "reaction_name": "Burning",
+        "aura_element": Element.PYRO,
+        "aura_name": "Burning",
+        "locked": True,
+        "units": 1.0,
+    },
+    frozenset({Element.DENDRO, Element.CRYO}): {
+        "reaction_name": "Rimegrass",
+        "aura_element": Element.DENDRO,
+        "aura_name": "Rimegrass",
+        "locked": True,
+        "units": 1.0,
+    },
 }
 
 @dataclass
@@ -195,57 +182,60 @@ class Character(CombatUnit):
     def get_resistance(self, element: Element) -> float:
         return self.resistances.get(element, 0.1)
 
-    def apply_elemental_effect(self, element: Element, attacker: Optional['Character'] = None, icd_tag: str = None, icd_interval: int = 3, units: float = 1.0):
-        current_elements = {aura.element for aura in self.auras if aura.units > 0}
+    def apply_elemental_effect(self, element: Element, attacker: Optional['Character'] = None, units: float = 1.0):
 
-        for existing_element in current_elements:
-            key = frozenset({element, existing_element})
-            if key in REACTIONS:
-                reaction = REACTIONS[key]
-                # Remove auras involved in reaction
+        result = ElementalApplicationResult()
+
+        current_auras = [a for a in self.auras if a.units > 0]
+
+        for existing in current_auras:
+            key = frozenset({element, existing.element})
+            if key in REACTIONS_WITH_AURA:
+                reaction_data = REACTIONS_WITH_AURA[key]
+
+                # Remove both contributing elements
                 self.auras = [a for a in self.auras if a.element not in key]
 
-                # Apply reaction aura
+                # Apply locked composite aura
                 new_aura = Aura(
-                    name=reaction["aura_name"],
-                    element=reaction["aura_element"],
-                    units=reaction["units"],
-                    locked=reaction["locked"],
+                    name=reaction_data["aura_name"],
+                    element=reaction_data["aura_element"],
+                    units=reaction_data["units"],
+                    locked=reaction_data["locked"],
+                    source_elements=key
                 )
                 self.auras.append(new_aura)
+                result.reaction = reaction_data["reaction_name"]
+                result.new_aura = new_aura
+                return result
 
-                print(f"{self.name} is now affected by {reaction['aura_name']}.")
-                return  # Reaction triggered, no further aura applied
-
-        # Normal aura application fallback
         existing = next((a for a in self.auras if a.element == element), None)
-
-        if element in NON_PERSISTENT_AURAS and not existing:
-            print(f"{element.name} is a non-persistent aura. Skipping.")
-            return
-
         if existing:
             if existing.locked:
-                print(f"{self.name} already has a locked {element.name} aura. No new units applied.")
-                return
-            existing.duration = max(existing.duration, 2)
-            existing.units = max(existing.units, 1)
-            print(f"Refreshed {element.name} aura on {self.name} to {existing.units}U.")
+                print(f"{self.name} already has a locked {element.name} aura.")
+                return result
+            existing.units = max(existing.units, units)
+            existing.duration = 2
+            result.new_aura = existing
         else:
-            self.auras.append(Aura(name=element.name, element=element, units=units))
-            print(f"{element.name} {units}U aura applied to {self.name}.")
-        def decay_auras(self):
-            remaining_auras = []
-            for aura in self.auras:
-                if aura.locked:
-                    remaining_auras.append(aura)
-                    continue
-                expired = aura.decay()
-                if not expired:
-                    remaining_auras.append(aura)
-                else:
-                    print(f"{aura.name} aura on {self.name} has expired.")
-            self.auras = remaining_auras
+            new_aura = Aura(name=element.name, element=element, units=units)
+            self.auras.append(new_aura)
+            result.new_aura = new_aura
+
+        return result
+
+    def decay_auras(self):
+        remaining_auras = []
+        for aura in self.auras:
+            if aura.locked:
+                remaining_auras.append(aura)
+                continue
+            expired = aura.decay()
+            if not expired:
+                remaining_auras.append(aura)
+            else:
+                print(f"{aura.name} aura on {self.name} has expired.")
+        self.auras = remaining_auras
 
 @dataclass
 class Aura:
@@ -253,14 +243,17 @@ class Aura:
     element: 'Element'  # Face-up element
     units: float = 1.0
     duration: int = 2
-    decay_rate: float = 0.5
+    decay_rate: float = 0.3
     source: Optional['Character'] = None
     locked: bool = False
     source_elements: Set['Element'] = field(default_factory=set)
+    tags: set[AuraTag] = field(default_factory=set)
 
     def decay(self) -> bool:
-        self.units = max(0.0, self.units - self.decay_rate)
-        self.duration -= 1
+        if self.duration > 0:
+            self.duration -= 1
+        else:
+            self.units = max(0.0, self.units - self.decay_rate)
         return self.is_expired()
 
     def is_expired(self) -> bool:

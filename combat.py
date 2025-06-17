@@ -173,34 +173,39 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
     reacted_with_aura = None
 
     if effective_element:
-        # Track elements freshly applied this calculation to avoid repeats or loops
+        # Track new elements
         if not hasattr(defender, "_just_applied_elements"):
             defender._just_applied_elements = set()
         defender._just_applied_elements.add(effective_element)
 
-        # Apply element and get reaction result object or None
-        result = defender.apply_elemental_effect(
+        reaction_info = check_reaction(
+            new_element=effective_element,
+            existing_auras=defender.auras[:],
+            just_applied_elements=defender._just_applied_elements
+        )
+
+        defender.apply_elemental_effect(
             element=effective_element,
             attacker=attacker,
             units=1.0
         )
         applied_element = True
 
-        # Check if result is a reaction result object (assuming your ElementalApplicationResult class)
-        if result and hasattr(result, "reaction") and result.reaction:
-            reaction_name = result.reaction
-            reacted_with_aura = result.new_aura  # Aura that triggered the reaction (if any)
+        if reaction_info:
+            if isinstance(reaction_info, tuple):
+                reaction_name, reacted_with_aura = reaction_info
+            else:
+                reaction_name = reaction_info.get("reaction")
+                reacted_with_aura = reaction_info.get("triggering_aura")
 
-            print(f"[DEBUG] applying_elemental_effect returned reaction: {reaction_name}")
-
-            # Resolve reaction effects (damage, delays, buffs, etc.)
+            # Resolve the reaction normally
             reaction_result_data = resolve_reaction_effect(reaction_name, attacker, defender, turn_manager)
             reaction_hits.extend(reaction_result_data)
 
             emoji = REACTION_EMOJIS.get(reaction_name, "💥")
             print(f"{emoji} {reaction_name} triggered by {attacker.name}!")
 
-            # If no reaction hits were appended but reaction is transformative, manually add damage
+            # Handle reaction-based damage bonuses or special logic
             reaction_hit_exists = any(isinstance(r, ReactionHit) and is_transformative(r.reaction) for r in reaction_result_data)
             if is_transformative(reaction_name) and not reaction_hit_exists:
                 reaction_result = calculate_transformative_damage(reaction_name, attacker)
@@ -225,6 +230,7 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
             # Consume aura units if appropriate
             if reacted_with_aura and is_consuming_reaction(reaction_name):
                 consume_aura_units(defender, reacted_with_aura.element, reaction=reaction_name)
+
 
     if hasattr(defender, "_just_applied_elements"):
         del defender._just_applied_elements
@@ -367,7 +373,6 @@ def check_reaction(new_element: Element, existing_auras: list, just_applied_elem
         (Element.PYRO, Element.IMAGINARY): "Ignition",
         (Element.HYDRO, Element.IMAGINARY): "Anchor",
         (Element.ELECTRO, Element.IMAGINARY): "Impulse",
-        # ... add others
     }
     
     if new_element == Element.QUANTUM:
@@ -383,29 +388,14 @@ def check_reaction(new_element: Element, existing_auras: list, just_applied_elem
         elif new_element == Element.DENDRO:
             print(f"Reaction Spread detected with existing Quicken and {new_element.name}")
             return "Spread", "Quicken"
-    
+
     for aura in existing_auras:
-        source_elements = getattr(aura, "source_elements", {aura.element})
+        source_elements = aura.source_elements or {aura.element}
         for elem in source_elements:
             reaction = reaction_table.get((new_element, elem)) or reaction_table.get((elem, new_element))
             if reaction:
                 print(f"Reaction {reaction} detected between {new_element.name} and {elem.name}")
                 return reaction, aura
-    
-    for aura in existing_auras:
-        if aura.locked and hasattr(aura, "source_elements"):
-            elements = aura.source_elements
-            just_applied_elements = getattr(aura, "_just_applied_elements", getattr(aura, "_owner", None)._just_applied_elements if hasattr(aura, "_owner") else set())
-
-            # ✅ Only allow retrigger if BOTH elements were reapplied this frame
-            if elements.issubset(just_applied_elements):
-                for e1 in elements:
-                    for e2 in elements:
-                        if e1 == e2:
-                            continue
-                        if (e1, e2) in reaction_table or (e2, e1) in reaction_table:
-                            print(f"[DEBUG] Re-triggering {aura.name} with {e1.name} and {e2.name}")
-                            return aura.name, aura
 
     return None, None
 
@@ -419,6 +409,7 @@ def consume_aura_units(defender: Character, element: Element, reaction: str = No
     units_to_consume = REACTION_AURA_CONSUMPTION.get(reaction, 1.0)
 
     for aura in defender.auras:
+        print(f"[DEBUG] {element.name} aura on {defender.name} has {aura.units:.2f}U before consumption")
         if aura.element == element and not aura.locked:
             aura.units = max(0, aura.units - units_to_consume)
             if aura.units <= 0:
@@ -557,7 +548,6 @@ def resolve_reaction_effect(reaction: str, attacker: Character, defender: Charac
                 element=damage["element"]
             ))
         
-    print(f"[DEBUG] resolve_reaction_effect: triggering {reaction}")
     return hits
 
 def log_damage(source: Character, target: Character, amount: int,
