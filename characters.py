@@ -481,12 +481,12 @@ ravaging_confession = Talent(
         DamageInstance(multiplier=0.99,
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
-                       element=Element.CRYO,
+                       element=Element.PYRO,
                        ),
         DamageInstance(multiplier=2.31,
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
-                       element=Element.CRYO,
+                       element=Element.PYRO,
                        )
     ],
     cooldown=1
@@ -532,7 +532,6 @@ imaginary_confession = Talent(
     ],
     cooldown=1
 )
-
 
 rosaria.set_normal_attack_chain(church_spear)
 rosaria.add_talent(ravaging_confession, "skill")

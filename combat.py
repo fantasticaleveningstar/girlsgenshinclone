@@ -147,8 +147,6 @@ def calculate_res_multiplier(defender: Character, element: Element) -> float:
         return 1 / (4 * res + 1)
 
 def calculate_damage(attacker: Character, defender: Character, instance: DamageInstance, turn_manager: TurnManager):
-    turn_manager = turn_manager
-
     base_stat = attacker.get_stat(instance.scaling_stat)
     base_damage = (base_stat * instance.multiplier * instance.base_dmg_multiplier)
     base_damage += instance.additive_base_dmg_bonus
@@ -170,45 +168,42 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
 
     effective_element = instance.element
     reaction_hits = []
-
     applied_element = False
-    reaction = None
-    reaction_from_apply = None
+    reaction_name = None
+    reacted_with_aura = None
+
     if effective_element:
+        # Track elements freshly applied this calculation to avoid repeats or loops
         if not hasattr(defender, "_just_applied_elements"):
             defender._just_applied_elements = set()
         defender._just_applied_elements.add(effective_element)
+
+        # Apply element and get reaction result object or None
         result = defender.apply_elemental_effect(
-                    element=effective_element,
-                    attacker=attacker,
-                    units=1.0
-            )
+            element=effective_element,
+            attacker=attacker,
+            units=1.0
+        )
         applied_element = True
 
-        if isinstance(result, str):
-            reaction_from_apply = result
-            reaction = result
-            reacted_with = None
-        else:
-            reaction, reacted_with = check_reaction(
-                effective_element,
-                defender.auras,
-                just_applied_elements=defender._just_applied_elements
-            )
-        print(f"[DEBUG] applying_elemental_effect returned: {reaction}")
-        if reaction:
-            if reaction == reaction_from_apply:
-                reaction_result_data = resolve_reaction_effect(reaction, attacker, defender, turn_manager)
-            else:
-                reaction_result_data = []
-            reaction_hit_exists = any(isinstance(r, ReactionHit) and is_transformative(r.reaction) for r in reaction_result_data)
+        # Check if result is a reaction result object (assuming your ElementalApplicationResult class)
+        if result and hasattr(result, "reaction") and result.reaction:
+            reaction_name = result.reaction
+            reacted_with_aura = result.new_aura  # Aura that triggered the reaction (if any)
+
+            print(f"[DEBUG] applying_elemental_effect returned reaction: {reaction_name}")
+
+            # Resolve reaction effects (damage, delays, buffs, etc.)
+            reaction_result_data = resolve_reaction_effect(reaction_name, attacker, defender, turn_manager)
             reaction_hits.extend(reaction_result_data)
 
-            emoji = REACTION_EMOJIS.get(reaction, "💥")
-            print(f"{emoji} {reaction} triggered by {attacker.name}!")
+            emoji = REACTION_EMOJIS.get(reaction_name, "💥")
+            print(f"{emoji} {reaction_name} triggered by {attacker.name}!")
 
-            if is_transformative(reaction) and not reaction_hit_exists:
-                reaction_result = calculate_transformative_damage(reaction, attacker)
+            # If no reaction hits were appended but reaction is transformative, manually add damage
+            reaction_hit_exists = any(isinstance(r, ReactionHit) and is_transformative(r.reaction) for r in reaction_result_data)
+            if is_transformative(reaction_name) and not reaction_hit_exists:
+                reaction_result = calculate_transformative_damage(reaction_name, attacker)
                 reaction_hits.append(ReactionHit(
                     source=attacker,
                     target=defender,
@@ -217,26 +212,19 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
                     element=reaction_result["element"]
                 ))
 
-            elif is_amplifying(reaction):
-                reaction_bonus = calculate_amplifying_damage(reaction, attacker)
+            elif is_amplifying(reaction_name):
+                reaction_bonus = calculate_amplifying_damage(reaction_name, attacker)
                 base_damage *= reaction_bonus
-            elif reaction == "Aggravate":
+
+            elif reaction_name == "Aggravate":
                 base_damage += check_aggravate(attacker, defender, effective_element)
-            elif reaction == "Spread":
+
+            elif reaction_name == "Spread":
                 base_damage += check_spread(attacker, defender, effective_element)
 
-            if is_consuming_reaction(reaction) and reacted_with in defender.auras:
-                if isinstance(reacted_with, Aura):
-                    consume_aura_units(defender, reacted_with.element, reaction=reaction)
-                    reapplied = False
-                else:
-                    reapplied = True
-        
-            else:
-                reapplied = True
-            
-            if not reapplied:
-                pass
+            # Consume aura units if appropriate
+            if reacted_with_aura and is_consuming_reaction(reaction_name):
+                consume_aura_units(defender, reacted_with_aura.element, reaction=reaction_name)
 
     if hasattr(defender, "_just_applied_elements"):
         del defender._just_applied_elements
@@ -253,7 +241,7 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
     }
 
 def is_consuming_reaction(reaction: str) -> bool:
-    return reaction not in ("Quicken", "Aggravate", "Spread", "Frozen", "Electro-Charged", "Burning", "Stasis")
+    return reaction not in ("Quicken", "Aggravate", "Spread", "Frozen", "Electro-Charged", "Burning")
 
 def check_aggravate(attacker: Character, defender: Character, damage_element: Element):
     if damage_element != Element.ELECTRO:
@@ -314,6 +302,12 @@ def calculate_transformative_damage(reaction: str, attacker: Character) -> float
         element = Element.PHYSICAL
     elif reaction == "Stasis":
         element = Element.IMAGINARY
+    elif reaction == "Ignition":
+        element = Element.IMAGINARY
+    elif reaction == "Impulse":
+        element = Element.IMAGINARY
+    elif reaction == "Anchor":
+        element = Element.IMAGINARY
     else:
         element = Element.PHYSICAL  # fallback
 
@@ -334,13 +328,16 @@ def get_transformative_multiplier(reaction: str) -> float:
         "Superconduct": 1.5,
         "Swirl": 0.6,
         "Burning": 0.6,
-        "Stasis": 1.5,
+        "Stasis": 2.25,
+        "Ignition": 2.25,
+        "Impulse": 2.25,
+        "Anchor": 2.25,
     }.get(reaction, 1.0)
 
 def is_transformative(reaction: str) -> bool:
     return reaction in {
         "Overload", "Electro-Charged", "Superconduct",
-        "Swirl", "Bloom", "Hyperbloom", "Burgeon", "Burning", "Stasis"
+        "Swirl", "Bloom", "Hyperbloom", "Burgeon", "Burning", "Stasis", "Ignition", "Impulse", "Anchor"
         }
 
 def is_amplifying(reaction: str) -> bool:
@@ -367,6 +364,9 @@ def check_reaction(new_element: Element, existing_auras: list, just_applied_elem
         (Element.ELECTRO, Element.DENDRO): "Quicken",
         (Element.DENDRO, Element.ELECTRO): "Quicken",
         (Element.CRYO, Element.IMAGINARY): "Stasis",
+        (Element.PYRO, Element.IMAGINARY): "Ignition",
+        (Element.HYDRO, Element.IMAGINARY): "Anchor",
+        (Element.ELECTRO, Element.IMAGINARY): "Impulse",
         # ... add others
     }
     
@@ -509,39 +509,54 @@ def resolve_reaction_effect(reaction: str, attacker: Character, defender: Charac
         print(f"🌿❄️ {defender.name} is now Frost-Twined (x5 Cryo/Dendro multiplier)!")
 
     elif reaction == "Stasis":
-        imprisonment = None
-        # Find existing Stasis aura on defender
-        for aura in defender.auras:
-            if aura.name == "Stasis" and aura.element == Element.CRYO:
-                imprisonment = aura
-                break
+            print(f"🌀 {defender.name} is afflicted by Stasis — delaying turn!")
+            turn_manager.delay_by_percent(defender, 0.25)  # Apply the AV delay
 
-        if imprisonment is None:
-            # Add new Stasis aura if not found
-            imprisonment = Aura(element=Element.CRYO, name="Stasis", units=1.0, locked=True, source_elements={Element.CRYO, Element.IMAGINARY})
-            defender.auras.append(imprisonment)
-            print(f"Dummy is now affected by Stasis.")
-        else:
-            # Increase existing units
-            imprisonment.units += 1.0
-            print(f"🌀 {defender.name}'s Stasis aura increases to {imprisonment.units:.1f}U")
-
-        # Delay logic here
-        turn_manager.delay_by_percent(defender, 0.1 * 1.0)
-
-        if imprisonment.units >= 4:
             damage = calculate_transformative_damage("Stasis", attacker)
             hits.append(ReactionHit(
                 source=attacker,
                 target=defender,
-                reaction="Stasis",
+                reaction=damage["label"],
                 damage=damage["damage"],
                 element=damage["element"]
             ))
-            print(f"✨❄️ Detonation! {defender.name} takes {damage['damage']} Imaginary DMG.")
-            turn_manager.delay_by_percent(defender, 0.3)
-            defender.auras.remove(imprisonment)
-    
+    elif reaction == "Ignition":
+            print(f"🌀 {defender.name} is afflicted by Ignition — increasing speed!")
+            turn_manager.delay_by_percent(defender, -0.6)  # Apply the SPD increase
+
+            damage = calculate_transformative_damage("Ignition", attacker)
+            hits.append(ReactionHit(
+                source=attacker,
+                target=defender,
+                reaction=damage["label"],
+                damage=damage["damage"],
+                element=damage["element"]
+            ))
+    elif reaction == "Impulse":
+            print(f"🌀 {defender.name} is afflicted by Impulse — advancing action!")
+            turn_manager.delay_by_percent(defender, -0.25)  # Apply the AV advance
+
+            damage = calculate_transformative_damage("Impulse", attacker)
+            hits.append(ReactionHit(
+                source=attacker,
+                target=defender,
+                reaction=damage["label"],
+                damage=damage["damage"],
+                element=damage["element"]
+            ))
+    elif reaction == "Anchor":
+            print(f"🌀 {defender.name} is afflicted by Anchor — decreasing speed!")
+            turn_manager.delay_by_percent(defender, 0.6)  # Apply the SPD decrease
+
+            damage = calculate_transformative_damage("Anchor", attacker)
+            hits.append(ReactionHit(
+                source=attacker,
+                target=defender,
+                reaction=damage["label"],
+                damage=damage["damage"],
+                element=damage["element"]
+            ))
+        
     print(f"[DEBUG] resolve_reaction_effect: triggering {reaction}")
     return hits
 
