@@ -22,7 +22,7 @@ class AuraTag(Enum):
     BURNING = auto()
     ELECTRO_CHARGED = auto()
     RIMEGRASS = auto()
-    # You can add others here
+
 
 NON_PERSISTENT_AURAS = {Element.ANEMO, Element.GEO, Element.QUANTUM, Element.PHYSICAL}
 

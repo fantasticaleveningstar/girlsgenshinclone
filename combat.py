@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
-from core import Character, Element, DamageInstance, StatType, Aura, Summon, DamageType
+from core import Character, Element, DamageInstance, StatType, Aura, Summon, DamageType, AuraTag
 from turn import TurnManager, Buff
 from constants import ELEMENT_EMOJIS
 
@@ -376,9 +376,9 @@ def check_reaction(new_element: Element, existing_auras: list, just_applied_elem
     }
     
     if new_element == Element.QUANTUM:
-        if len(existing_auras) >= 2:
-            return "Superposition", (existing_auras[0], existing_auras[1])
-        return None, None
+        for aura in existing_auras:
+            if any(tag in aura.tags for tag in AuraTag):
+                return "Superposition", aura
 
 
     if any(aura.name == "Quicken" for aura in existing_auras):
