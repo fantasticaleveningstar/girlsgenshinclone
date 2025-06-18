@@ -284,7 +284,7 @@ def calculate_amplifying_damage(reaction: str, attacker: Character) -> float:
         em_multi = 2.78
     return base_multi * (1 + (em_multi * (em)/(1400 + em)))
 
-def calculate_transformative_damage(reaction: str, attacker: Character) -> float:
+def calculate_transformative_damage(reaction: str, attacker: Character, source_elements: Optional[frozenset[Element]] = None) -> float:
     em = attacker.get_stat(StatType.EM)
 
     base_damage = 1446  # placeholder value for reaction base damage
@@ -312,6 +312,15 @@ def calculate_transformative_damage(reaction: str, attacker: Character) -> float
         element = Element.IMAGINARY
     elif reaction == "Anchor":
         element = Element.IMAGINARY
+    elif reaction == "Superposition" and source_elements:
+        element = random.choice(list(source_elements))
+        superposition_hit = {
+            "damage": int(final_damage),
+            "element": element,
+            "label": reaction,
+            "crit": True 
+        }
+        return superposition_hit
     else:
         element = Element.PHYSICAL  # fallback
 
@@ -341,7 +350,7 @@ def get_transformative_multiplier(reaction: str) -> float:
 def is_transformative(reaction: str) -> bool:
     return reaction in {
         "Overload", "Electro-Charged", "Superconduct",
-        "Swirl", "Bloom", "Hyperbloom", "Burgeon", "Burning", "Stasis", "Ignition", "Impulse", "Anchor"
+        "Swirl", "Bloom", "Hyperbloom", "Burgeon", "Burning", "Stasis", "Ignition", "Impulse", "Anchor", "Superposition",
         }
 
 def is_amplifying(reaction: str) -> bool:
@@ -396,11 +405,11 @@ def check_reaction(new_element: Element, existing_auras: list, just_applied_elem
 
     return None, None
 
-def reaction_effect(reaction: str, attacker: Character, defender: Character):
+"""def reaction_effect(reaction: str, attacker: Character, source_elements: Optional[frozenset[Element]] = None ):
     if is_transformative(reaction):
-        return calculate_transformative_damage(reaction, attacker)
+        return calculate_transformative_damage(reaction, attacker, source_elements)
     if is_amplifying(reaction):
-        return calculate_amplifying_damage(reaction, attacker)
+        return calculate_amplifying_damage(reaction, attacker)"""
 
 def consume_aura_units(defender: Character, element: Element, reaction: str = None):
     units_to_consume = REACTION_AURA_CONSUMPTION.get(reaction, 1.0)

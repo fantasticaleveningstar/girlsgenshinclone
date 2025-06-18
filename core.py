@@ -40,35 +40,30 @@ REACTIONS_WITH_AURA = {
         "reaction_name": "Quicken",
         "aura_element": Element.DENDRO,
         "aura_name": "Quicken",
-        "locked": True,
         "units": 1.0,
     },
     frozenset({Element.HYDRO, Element.CRYO}): {
         "reaction_name": "Frozen",
         "aura_element": Element.CRYO,
         "aura_name": "Frozen",
-        "locked": True,
         "units": 1.0,
     },
     frozenset({Element.ELECTRO, Element.HYDRO}): {
         "reaction_name": "Electro-Charged",
         "aura_element": Element.ELECTRO,
         "aura_name": "Electro-Charged",
-        "locked": True,
         "units": 1.0,
     },
     frozenset({Element.DENDRO, Element.PYRO}): {
         "reaction_name": "Burning",
         "aura_element": Element.PYRO,
         "aura_name": "Burning",
-        "locked": True,
         "units": 1.0,
     },
     frozenset({Element.DENDRO, Element.CRYO}): {
         "reaction_name": "Rimegrass",
         "aura_element": Element.DENDRO,
         "aura_name": "Rimegrass",
-        "locked": True,
         "units": 1.0,
     },
 }
@@ -196,14 +191,12 @@ class Character(CombatUnit):
                 # Remove both contributing elements
                 self.auras = [a for a in self.auras if a.element not in key]
 
-                # Apply locked composite aura
                 new_aura = create_aura(
                     name=reaction_data["aura_name"],
                     element=reaction_data["aura_element"],
                     units=reaction_data["units"],
                     duration=2,
                     source_name=reaction_data["aura_name"],
-                    locked=reaction_data["locked"],
                     source_elements=key
                 )
                 self.auras.append(new_aura)
@@ -216,14 +209,11 @@ class Character(CombatUnit):
 
         existing = next((a for a in self.auras if a.element == element), None)
         if existing:
-            if existing.locked:
-                print(f"{self.name} already has a locked {element.name} aura.")
-                return result
             existing.units = max(existing.units, units)
             existing.duration = 2
             result.new_aura = existing
         else:
-            new_aura = create_aura(name=element.name, element=element, units=units, duration=2, source_name=None, locked=False)
+            new_aura = create_aura(name=element.name, element=element, units=units, duration=2, source_name=None)
             self.auras.append(new_aura)
             result.new_aura = new_aura
 
@@ -232,9 +222,6 @@ class Character(CombatUnit):
     def decay_auras(self):
         remaining_auras = []
         for aura in self.auras:
-            if aura.locked:
-                remaining_auras.append(aura)
-                continue
             expired = aura.decay()
             if not expired:
                 remaining_auras.append(aura)
