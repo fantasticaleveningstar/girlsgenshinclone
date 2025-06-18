@@ -40,35 +40,30 @@ REACTIONS_WITH_AURA = {
         "reaction_name": "Quicken",
         "aura_element": Element.DENDRO,
         "aura_name": "Quicken",
-        "locked": True,
         "units": 1.0,
     },
     frozenset({Element.HYDRO, Element.CRYO}): {
         "reaction_name": "Frozen",
         "aura_element": Element.CRYO,
         "aura_name": "Frozen",
-        "locked": True,
         "units": 1.0,
     },
     frozenset({Element.ELECTRO, Element.HYDRO}): {
         "reaction_name": "Electro-Charged",
         "aura_element": Element.ELECTRO,
         "aura_name": "Electro-Charged",
-        "locked": True,
         "units": 1.0,
     },
     frozenset({Element.DENDRO, Element.PYRO}): {
         "reaction_name": "Burning",
         "aura_element": Element.PYRO,
         "aura_name": "Burning",
-        "locked": True,
         "units": 1.0,
     },
     frozenset({Element.DENDRO, Element.CRYO}): {
         "reaction_name": "Rimegrass",
         "aura_element": Element.DENDRO,
         "aura_name": "Rimegrass",
-        "locked": True,
         "units": 1.0,
     },
 }
@@ -196,12 +191,12 @@ class Character(CombatUnit):
                 # Remove both contributing elements
                 self.auras = [a for a in self.auras if a.element not in key]
 
-                # Apply locked composite aura
-                new_aura = Aura(
+                new_aura = create_aura(
                     name=reaction_data["aura_name"],
                     element=reaction_data["aura_element"],
                     units=reaction_data["units"],
-                    locked=reaction_data["locked"],
+                    duration=2,
+                    source_name=reaction_data["aura_name"],
                     source_elements=key
                 )
                 self.auras.append(new_aura)
@@ -209,16 +204,16 @@ class Character(CombatUnit):
                 result.new_aura = new_aura
                 return result
 
+        if element in NON_PERSISTENT_AURAS:
+            return result
+
         existing = next((a for a in self.auras if a.element == element), None)
         if existing:
-            if existing.locked:
-                print(f"{self.name} already has a locked {element.name} aura.")
-                return result
             existing.units = max(existing.units, units)
             existing.duration = 2
             result.new_aura = existing
         else:
-            new_aura = Aura(name=element.name, element=element, units=units)
+            new_aura = create_aura(name=element.name, element=element, units=units, duration=2, source_name=None)
             self.auras.append(new_aura)
             result.new_aura = new_aura
 
@@ -227,9 +222,6 @@ class Character(CombatUnit):
     def decay_auras(self):
         remaining_auras = []
         for aura in self.auras:
-            if aura.locked:
-                remaining_auras.append(aura)
-                continue
             expired = aura.decay()
             if not expired:
                 remaining_auras.append(aura)
@@ -261,6 +253,50 @@ class Aura:
     
     def is_composite(self) -> bool:
         return len(self.source_elements) > 1
+    
+    def add_tag(self, tag: AuraTag):
+        self.tags.add(tag)
+
+    def has_tag(self, tag: AuraTag) -> bool:
+        return tag in self.tags
+
+    def has_any_tag(self, tag_set: set[AuraTag]) -> bool:
+        return any(tag in self.tags for tag in tag_set)
+
+    def remove_tag(self, tag: AuraTag):
+        self.tags.discard(tag)
+
+SPECIAL_AURA_TAGS = {
+    "Quicken": AuraTag.QUICKEN,
+    "Frozen": AuraTag.FROZEN,
+    "Burning": AuraTag.BURNING,
+    "Electro-Charged": AuraTag.ELECTRO_CHARGED,
+    "Rimegrass": AuraTag.RIMEGRASS,
+}
+
+def create_aura(
+    name: str,
+    element: Element,
+    units: float = 1.0,
+    duration: int = 2,
+    source_name: Optional[str] = None,
+    locked: bool = False,
+    source_elements: Optional[frozenset[Element]] = None
+) -> Aura:
+    aura = Aura(
+        name=name,
+        element=element,
+        units=units,
+        duration=duration,
+        locked=locked,
+        source_elements=source_elements,
+    )
+
+    tag = SPECIAL_AURA_TAGS.get(source_name)
+    if tag:
+        aura.add_tag(tag)
+    print(aura)
+    return aura
 
 class DamageInstance:
     def __init__(self, multiplier: float, scaling_stat: StatType, damage_type: DamageType,
@@ -340,3 +376,4 @@ def get_speed(unit):
     if hasattr(unit, 'get_stat'):
         return max(1, unit.get_stat(StatType.SPD))
     return 100  # generic fallback
+
