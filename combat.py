@@ -198,14 +198,12 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
                 reaction_name = reaction_info.get("reaction")
                 reacted_with_aura = reaction_info.get("triggering_aura")
 
-            # Resolve the reaction normally
             reaction_result_data = resolve_reaction_effect(reaction_name, attacker, defender, turn_manager)
             reaction_hits.extend(reaction_result_data)
 
             emoji = REACTION_EMOJIS.get(reaction_name, "💥")
             print(f"{emoji} {reaction_name} triggered by {attacker.name}!")
 
-            # Handle reaction-based damage bonuses or special logic
             reaction_hit_exists = any(isinstance(r, ReactionHit) and is_transformative(r.reaction) for r in reaction_result_data)
             if is_transformative(reaction_name) and not reaction_hit_exists:
                 reaction_result = calculate_transformative_damage(reaction_name, attacker)
@@ -380,7 +378,6 @@ def check_reaction(new_element: Element, existing_auras: list, just_applied_elem
             if any(tag in aura.tags for tag in AuraTag):
                 return "Superposition", aura
 
-
     if any(aura.name == "Quicken" for aura in existing_auras):
         if new_element == Element.ELECTRO:
             print(f"Reaction Aggravate detected with existing Quicken and {new_element.name}")
@@ -402,7 +399,7 @@ def check_reaction(new_element: Element, existing_auras: list, just_applied_elem
 def reaction_effect(reaction: str, attacker: Character, defender: Character):
     if is_transformative(reaction):
         return calculate_transformative_damage(reaction, attacker)
-    else:
+    if is_amplifying(reaction):
         return calculate_amplifying_damage(reaction, attacker)
 
 def consume_aura_units(defender: Character, element: Element, reaction: str = None):
@@ -410,7 +407,7 @@ def consume_aura_units(defender: Character, element: Element, reaction: str = No
 
     for aura in defender.auras:
         print(f"[DEBUG] {element.name} aura on {defender.name} has {aura.units:.2f}U before consumption")
-        if aura.element == element and not aura.locked:
+        if aura.element == element:
             aura.units = max(0, aura.units - units_to_consume)
             if aura.units <= 0:
                 print(f"{element.name} aura on {defender.name} fully consumed.")
