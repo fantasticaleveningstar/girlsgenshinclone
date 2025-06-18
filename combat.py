@@ -206,7 +206,7 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
 
             reaction_hit_exists = any(isinstance(r, ReactionHit) and is_transformative(r.reaction) for r in reaction_result_data)
             if is_transformative(reaction_name) and not reaction_hit_exists:
-                reaction_result = calculate_transformative_damage(reaction_name, attacker)
+                reaction_result = calculate_transformative_damage(reaction_name, attacker, source_elements=reacted_with_aura.source_elements if reacted_with_aura else None)
                 reaction_hits.append(ReactionHit(
                     source=attacker,
                     target=defender,
@@ -215,7 +215,7 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
                     element=reaction_result["element"]
                 ))
 
-            elif is_amplifying(reaction_name):
+            if is_amplifying(reaction_name):
                 reaction_bonus = calculate_amplifying_damage(reaction_name, attacker)
                 base_damage *= reaction_bonus
 
@@ -294,7 +294,7 @@ def calculate_transformative_damage(reaction: str, attacker: Character, source_e
 
     if reaction in ["Bloom", "Hyperbloom", "Burgeon"]:
         element = Element.DENDRO
-    elif reaction == "Overloaded":
+    elif reaction == ["Overloaded", "Burning"]:
         element = Element.PYRO
     elif reaction == "Electro-Charged":
         element = Element.ELECTRO
@@ -304,13 +304,7 @@ def calculate_transformative_damage(reaction: str, attacker: Character, source_e
         element = Element.ANEMO
     elif reaction == "Shatter":
         element = Element.PHYSICAL
-    elif reaction == "Stasis":
-        element = Element.IMAGINARY
-    elif reaction == "Ignition":
-        element = Element.IMAGINARY
-    elif reaction == "Impulse":
-        element = Element.IMAGINARY
-    elif reaction == "Anchor":
+    elif reaction == ["Stasis", "Ignition", "Impulse", "Anchor"]:
         element = Element.IMAGINARY
     elif reaction == "Superposition" and source_elements:
         element = random.choice(list(source_elements))
@@ -345,6 +339,7 @@ def get_transformative_multiplier(reaction: str) -> float:
         "Ignition": 2.25,
         "Impulse": 2.25,
         "Anchor": 2.25,
+        "Superposition": 3,
     }.get(reaction, 1.0)
 
 def is_transformative(reaction: str) -> bool:
@@ -404,12 +399,6 @@ def check_reaction(new_element: Element, existing_auras: list, just_applied_elem
                 return reaction, aura
 
     return None, None
-
-"""def reaction_effect(reaction: str, attacker: Character, source_elements: Optional[frozenset[Element]] = None ):
-    if is_transformative(reaction):
-        return calculate_transformative_damage(reaction, attacker, source_elements)
-    if is_amplifying(reaction):
-        return calculate_amplifying_damage(reaction, attacker)"""
 
 def consume_aura_units(defender: Character, element: Element, reaction: str = None):
     units_to_consume = REACTION_AURA_CONSUMPTION.get(reaction, 1.0)

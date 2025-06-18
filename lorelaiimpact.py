@@ -218,7 +218,7 @@ def reset_combo(character):
     character.combo_index = 0
 
 dummy = Character("Dummy", 
-                  base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 75}, element=Element.PYRO)
+                  base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 10}, element=Element.PYRO)
 
 def battle_loop(player_team: list[Character], enemy_team: list[Character]):
     for unit in player_team:
