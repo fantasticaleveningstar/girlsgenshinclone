@@ -302,7 +302,6 @@ def create_aura(
     tag = SPECIAL_AURA_TAGS.get(source_name)
     if tag:
         aura.add_tag(tag)
-    print(aura)
     return aura
 
 class DamageInstance:

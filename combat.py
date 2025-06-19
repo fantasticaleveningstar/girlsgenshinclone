@@ -28,6 +28,10 @@ REACTION_AURA_CONSUMPTION = {
     "Reverse Melt": 0.5,
     "Forward Vaporize": 2.0,
     "Reverse Vaporize": 0.5,
+    "Cryo Swirl": 0.5,
+    "Pyro Swirl": 0.5,
+    "Hydro Swirl": 0.5,
+    "Electro Swirl": 0.5,
     "Overload": 1.0,
     "Superconduct": 1.0,
     "Burning": 0.5,
@@ -188,9 +192,9 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
         )
 
         defender.apply_elemental_effect(
-            element=effective_element,
-            attacker=attacker,
-            units=1.0
+                element=effective_element,
+                attacker=attacker,
+                units=1.0
         )
         applied_element = True
 
@@ -209,7 +213,11 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
 
             reaction_hit_exists = any(isinstance(r, ReactionHit) and is_transformative(r.reaction) for r in reaction_result_data)
             if is_transformative(reaction_name) and not reaction_hit_exists:
-                reaction_result = calculate_transformative_damage(reaction_name, attacker, source_elements=reacted_with_aura.source_elements if reacted_with_aura else None)
+                reaction_result = calculate_transformative_damage(
+                    reaction_name, attacker, source_elements=reacted_with_aura.source_elements if reacted_with_aura else None
+                )
+                
+                # Primary hit
                 reaction_hits.append(ReactionHit(
                     source=attacker,
                     target=defender,
@@ -217,6 +225,22 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
                     damage=reaction_result["damage"],
                     element=reaction_result["element"]
                 ))
+
+                # AoE splash
+                aoe_radius = reaction_result.get("aoe_radius", 0.0)
+                if aoe_radius > 0:
+                    all_enemies = get_enemies(attacker, turn_manager)
+                    splash_targets = get_targets_in_radius(defender, all_enemies, aoe_radius)
+                    for target in splash_targets:
+                        if target == defender:
+                            continue
+                        reaction_hits.append(ReactionHit(
+                            source=attacker,
+                            target=target,
+                            reaction=f"{reaction_result['label']} (Splash)",
+                            damage=reaction_result["damage"],
+                            element=reaction_result["element"]
+                        ))
 
             if is_amplifying(reaction_name):
                 reaction_bonus = calculate_amplifying_damage(reaction_name, attacker)
@@ -292,34 +316,51 @@ def calculate_amplifying_damage(reaction: str, attacker: Character) -> float:
     return base_multi * (1 + (em_multi * (em)/(1400 + em)))
 
 def calculate_transformative_damage(reaction: str, attacker: Character, source_elements: Optional[frozenset[Element]] = None) -> float:
+    aoe_radius = 0.0
     em = attacker.get_stat(StatType.EM)
-
-    base_damage = 1446  # placeholder value for reaction base damage
-
+    base_damage = 1446 
     em_bonus = 1 + (16 * em / (em + 2000))
     final_damage = base_damage * em_bonus * get_transformative_multiplier(reaction)
 
     if reaction in ["Bloom", "Hyperbloom", "Burgeon"]:
         element = Element.DENDRO
-    elif reaction in ["Overloaded", "Burning"]:
+        aoe_radius = 2.0
+    elif reaction in ["Overload", "Burning"]:
         element = Element.PYRO
+        aoe_radius = 2.0
     elif reaction == "Electro-Charged":
         element = Element.ELECTRO
+        aoe_radius = 0.0
     elif reaction == "Superconduct":
         element = Element.CRYO
-    elif reaction == "Swirl":
-        element = Element.ANEMO
+        aoe_radius = 1.5
+    elif reaction == "Pyro Swirl":
+        element = Element.PYRO
+        aoe_radius = 3.0
+    elif reaction == "Cryo Swirl":
+        element = Element.CRYO
+        aoe_radius = 3.0
+    elif reaction == "Hydro Swirl":
+        element = Element.HYDRO
+        aoe_radius = 3.0
+    elif reaction == "Electro Swirl":
+        element = Element.ELECTRO
+        aoe_radius = 3.0
     elif reaction == "Shatter":
         element = Element.PHYSICAL
+        aoe_radius = 0.0
     elif reaction in ["Stasis", "Ignition", "Impulse", "Anchor"]:
         element = Element.IMAGINARY
+        aoe_radius = 0.0
     elif reaction == "Superposition" and source_elements:
         element = random.choice(list(source_elements))
+        aoe_radius = 2.0
         superposition_hit = {
             "damage": int(final_damage),
             "element": element,
             "label": reaction,
-            "crit": True 
+            "crit": True,
+            "aoe_radius": aoe_radius 
         }
         return superposition_hit
     else:
@@ -329,7 +370,8 @@ def calculate_transformative_damage(reaction: str, attacker: Character, source_e
         "damage": int(final_damage),
         "element": element,
         "label": reaction,
-        "crit": False
+        "crit": False,
+        "aoe_radius": aoe_radius
     }
 
 def get_transformative_multiplier(reaction: str) -> float:
@@ -337,10 +379,13 @@ def get_transformative_multiplier(reaction: str) -> float:
         "Burgeon": 3,
         "Hyperbloom": 3,
         "Shatter": 3,
-        "Overloaded": 2.75,
+        "Overload": 2.75,
         "Electro-Charged": 2,
         "Superconduct": 1.5,
-        "Swirl": 0.6,
+        "Pyro Swirl": 0.6,
+        "Cryo Swirl": 0.6,
+        "Hydro Swirl": 0.2,
+        "Electro Swirl": 0.6,
         "Burning": 0.6,
         "Stasis": 2.25,
         "Ignition": 2.25,
@@ -352,7 +397,7 @@ def get_transformative_multiplier(reaction: str) -> float:
 def is_transformative(reaction: str) -> bool:
     return reaction in {
         "Overload", "Electro-Charged", "Superconduct",
-        "Swirl", "Bloom", "Hyperbloom", "Burgeon", "Burning", "Stasis", "Ignition", "Impulse", "Anchor", "Superposition",
+        "Pyro Swirl", "Hydro Swirl", "Electro Swirl", "Cryo Swirl","Bloom", "Hyperbloom", "Burgeon", "Burning", "Stasis", "Ignition", "Impulse", "Anchor", "Superposition",
         }
 
 def is_amplifying(reaction: str) -> bool:
@@ -382,6 +427,10 @@ def check_reaction(new_element: Element, existing_auras: list, just_applied_elem
         (Element.PYRO, Element.IMAGINARY): "Ignition",
         (Element.HYDRO, Element.IMAGINARY): "Anchor",
         (Element.ELECTRO, Element.IMAGINARY): "Impulse",
+        (Element.CRYO, Element.ANEMO): "Cryo Swirl",
+        (Element.PYRO, Element.ANEMO): "Pyro Swirl",
+        (Element.HYDRO, Element.ANEMO): "Anemo Swirl",
+        (Element.ELECTRO, Element.ANEMO): "Electro Swirl",
     }
     
     if new_element == Element.QUANTUM:

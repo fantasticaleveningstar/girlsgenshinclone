@@ -606,13 +606,14 @@ bestial_ascent = Talent(
 )
 
 aura_app = Talent(
-    name="Pyro App",
+    name="Anemo App",
     description="Gaming Skill",
     damage_instances=[
         DamageInstance(multiplier=3.917,
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
-                       element=Element.PYRO,
+                       element=Element.ANEMO,
+                       aoe_radius=0.0
                        )
     ]
 )

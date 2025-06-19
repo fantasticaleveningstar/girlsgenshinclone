@@ -218,19 +218,19 @@ def reset_combo(character):
     character.combo_index = 0
 
 dummy_a = Character(
-    "Dummy",
+    "Dummy A",
     base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 10},
     element=Element.PYRO
 )
 
 dummy_b = Character(
-    "Dummy",
+    "Dummy B",
     base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 10},
     element=Element.PYRO
 )
 
 dummy_c = Character(
-    "Dummy",
+    "Dummy C",
     base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 10},
     element=Element.PYRO
 )
@@ -239,6 +239,8 @@ dummy_c = Character(
 dummy_a.position = Position(x=0, y=0)
 dummy_b.position = Position(x=1, y=1)
 dummy_c.position = Position(x=4, y=1)
+
+dummy_a.apply_elemental_effect(Element.ELECTRO)
 
 dummies = [dummy_a, dummy_b, dummy_c]
 place_in_grid(dummies, columns=3)
