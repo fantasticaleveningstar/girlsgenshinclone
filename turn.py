@@ -8,6 +8,7 @@ from collections import defaultdict
 from typing import Optional, Callable
 from core import Character, StatType, Summon, get_speed
 from constants import ELEMENT_EMOJIS
+from dendro_core import update_dendro_cores
 
 class Buff:
     def __init__(self, name, description, stat=None, amount=0, duration=0, source=None, trigger="on_turn_start", reversible=False, effect=None, cleanup_effect=None):
@@ -32,7 +33,7 @@ class BuffTimerUnit:
         self.speed = speed
         self.current_hp = 1  # Not used, just for compatibility
 
-    def get_stat(self, stat):
+    def get_stat(self):
         # Only SPD matters
         return self.speed
 
@@ -46,6 +47,7 @@ class TurnManager:
         self.buff_timers = []
         self.units = list(characters)
         self.player_team_size = len([c for c in characters if isinstance(c, Character)]) // 2
+        self.field_objects = []
 
         for char in characters:
             speed = char.get_stat(StatType.SPD)
@@ -66,9 +68,11 @@ class TurnManager:
         order = next(self.counter)
         heapq.heappush(self.timeline, (next_time, order, char))
 
+        update_dendro_cores(self)
+
         return char
     
-    def preview_turn_order(self, limit=10):
+    def preview_turn_order(self):
         seen = set()
         result = []
 

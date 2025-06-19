@@ -1,8 +1,11 @@
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from collections import defaultdict, namedtuple
-from typing import Optional, Callable, Set
+from typing import Optional, Callable, TYPE_CHECKING, Set
 import uuid
+
+if TYPE_CHECKING:
+    from turn import TurnManager
 
 class Element(Enum):
     PHYSICAL = auto()
@@ -22,7 +25,6 @@ class AuraTag(Enum):
     BURNING = auto()
     ELECTRO_CHARGED = auto()
     RIMEGRASS = auto()
-
 
 NON_PERSISTENT_AURAS = {Element.ANEMO, Element.GEO, Element.QUANTUM, Element.PHYSICAL}
 
@@ -184,7 +186,7 @@ class Character(CombatUnit):
     def get_resistance(self, element: Element) -> float:
         return self.resistances.get(element, 0.1)
 
-    def apply_elemental_effect(self, element: Element, attacker: Optional['Character'] = None, units: float = 1.0):
+    def apply_elemental_effect(self, element: Element, attacker: Optional['Character'] = None, units: float = 1.0, turn_manager: Optional['TurnManager'] = None):
 
         result = ElementalApplicationResult()
 
@@ -213,6 +215,21 @@ class Character(CombatUnit):
 
         if element in NON_PERSISTENT_AURAS:
             return result
+        
+        if turn_manager and element in (Element.PYRO, Element.ELECTRO):
+            from dendro_core import DendroCore, trigger_hyperbloom, trigger_burgeon
+            for obj in turn_manager.field_objects:
+                if isinstance(obj, DendroCore) and obj.active:
+                    if self.position and obj.position:
+                        if distance(self, obj.position) <= 1.5:
+                            if element == Element.ELECTRO:
+                                trigger_hyperbloom(obj, attacker or self, turn_manager)
+                                result.reaction = "Hyperbloom"
+                                return result
+                            elif element == Element.PYRO:
+                                trigger_burgeon(obj, attacker or self, turn_manager)
+                                result.reaction = "Burgeon"
+                                return result
 
         existing = next((a for a in self.auras if a.element == element), None)
         if existing:
@@ -235,6 +252,14 @@ class Character(CombatUnit):
             else:
                 print(f"{aura.name} aura on {self.name} has expired.")
         self.auras = remaining_auras
+
+class DendroCore:
+    def __init__(self, creator: Character, position: Position):
+        self.creator = creator
+        self.position = position
+        self.remaining_turns = 3  # Or time-to-live
+        self.is_active = True
+
 
 @dataclass
 class Aura:

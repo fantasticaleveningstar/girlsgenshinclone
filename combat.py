@@ -9,6 +9,7 @@ from typing import Optional, Callable
 from core import Character, Element, DamageInstance, StatType, Aura, Summon, DamageType, AuraTag, distance
 from turn import TurnManager, Buff
 from constants import ELEMENT_EMOJIS
+from dendro_core import spawn_dendro_core
 
 REACTION_EMOJIS = {
     "Forward Melt": "💥❄️🔥",
@@ -544,6 +545,9 @@ def resolve_reaction_effect(reaction: str, attacker: Character, defender: Charac
         )
         defender.buffs.append(debuff)
         print(f"🧊⚡ {defender.name} is affected by Superconduct (−40% Physical RES)!")
+    
+    if reaction == "Bloom":
+        spawn_dendro_core(attacker, defender, turn_manager)
 
     elif reaction == "Rimegrass":
         aura = Aura(element=Element.CRYO, name="Frost-Twined", units=5)
