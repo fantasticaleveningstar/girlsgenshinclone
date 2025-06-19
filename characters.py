@@ -600,18 +600,19 @@ bestial_ascent = Talent(
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
                        element=Element.QUANTUM,
+                       aoe_radius=1
                        )
     ]
 )
 
 aura_app = Talent(
-    name="Electro App",
+    name="Pyro App",
     description="Gaming Skill",
     damage_instances=[
         DamageInstance(multiplier=3.917,
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
-                       element=Element.ELECTRO,
+                       element=Element.PYRO,
                        )
     ]
 )

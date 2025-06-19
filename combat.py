@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
-from core import Character, Element, DamageInstance, StatType, Aura, Summon, DamageType, AuraTag
+from core import Character, Element, DamageInstance, StatType, Aura, Summon, DamageType, AuraTag, distance
 from turn import TurnManager, Buff
 from constants import ELEMENT_EMOJIS
 
@@ -84,6 +84,9 @@ class ICDTracker:
             if self.hit_counter >= self.interval:
                 self.hit_counter = 0
             return False
+
+def get_targets_in_radius(center: Character, candidates: list[Character], radius: float) -> list[Character]:
+    return [unit for unit in candidates if unit != center and distance(center, unit) <= radius]
 
 def notify_hp_change(unit: Character, old_hp: int, new_hp: int, team: list[Character]):
     diff = abs(new_hp - old_hp)
@@ -244,8 +247,12 @@ def calculate_damage(attacker: Character, defender: Character, instance: DamageI
         "applied_element": applied_element
     }
 
+def apply_damage_instance(attacker: Character, instance: DamageInstance, targets: list[Character], turn_manager):
+    for target in targets:
+        calculate_damage(attacker, target, instance, turn_manager)
+
 def is_consuming_reaction(reaction: str) -> bool:
-    return reaction not in ("Quicken", "Aggravate", "Spread", "Frozen", "Electro-Charged", "Burning")
+    return reaction not in ("Quicken", "Aggravate", "Spread", "Freeze", "Electro-Charged", "Burning")
 
 def check_aggravate(attacker: Character, defender: Character, damage_element: Element):
     if damage_element != Element.ELECTRO:
@@ -294,7 +301,7 @@ def calculate_transformative_damage(reaction: str, attacker: Character, source_e
 
     if reaction in ["Bloom", "Hyperbloom", "Burgeon"]:
         element = Element.DENDRO
-    elif reaction == ["Overloaded", "Burning"]:
+    elif reaction in ["Overloaded", "Burning"]:
         element = Element.PYRO
     elif reaction == "Electro-Charged":
         element = Element.ELECTRO
@@ -304,7 +311,7 @@ def calculate_transformative_damage(reaction: str, attacker: Character, source_e
         element = Element.ANEMO
     elif reaction == "Shatter":
         element = Element.PHYSICAL
-    elif reaction == ["Stasis", "Ignition", "Impulse", "Anchor"]:
+    elif reaction in ["Stasis", "Ignition", "Impulse", "Anchor"]:
         element = Element.IMAGINARY
     elif reaction == "Superposition" and source_elements:
         element = random.choice(list(source_elements))

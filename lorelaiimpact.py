@@ -6,8 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
-from core import Character, Element, StatType, Talent, DamageInstance, DamageType, Summon, Passive, NormalAttackChain
-from combat import calculate_damage, apply_icd, salon_attack_action, summon_salon_members, notify_hp_change, take_damage, heal, notify_damage_taken, resolve_reactions, trigger_event, log_damage, log_heal, get_living_allies
+from core import Character, Element, StatType, Talent, DamageInstance, DamageType, Summon, Passive, NormalAttackChain, Position, place_in_grid
+from combat import calculate_damage, apply_icd, salon_attack_action, summon_salon_members, notify_hp_change, take_damage, heal, notify_damage_taken, resolve_reactions, trigger_event, log_damage, log_heal, get_living_allies, get_targets_in_radius
 from turn import TurnManager, Buff, BuffTimerUnit
 from characters import gaming
 
@@ -217,8 +217,32 @@ def choose_action(character: Character):
 def reset_combo(character):
     character.combo_index = 0
 
-dummy = Character("Dummy", 
-                  base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 10}, element=Element.PYRO)
+dummy_a = Character(
+    "Dummy",
+    base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 10},
+    element=Element.PYRO
+)
+
+dummy_b = Character(
+    "Dummy",
+    base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 10},
+    element=Element.PYRO
+)
+
+dummy_c = Character(
+    "Dummy",
+    base_stats={StatType.HP: 5000000, StatType.ATK: 10, StatType.SPD: 10},
+    element=Element.PYRO
+)
+
+
+dummy_a.position = Position(x=0, y=0)
+dummy_b.position = Position(x=1, y=1)
+dummy_c.position = Position(x=4, y=1)
+
+dummies = [dummy_a, dummy_b, dummy_c]
+place_in_grid(dummies, columns=3)
+
 
 def battle_loop(player_team: list[Character], enemy_team: list[Character]):
     for unit in player_team:
@@ -418,6 +442,7 @@ def battle_loop(player_team: list[Character], enemy_team: list[Character]):
         print("\n💀 Defeat. Your team has been wiped out.")
 
 def use_talent(attacker: Character, defender: Character, talent: Talent, turn_manager: TurnManager, summary: dict = None, taken_summary: dict = None):
+    all_enemies = [unit for unit in turn_manager.units if unit.team != attacker.team]
     energy_type = talent.energy_type
     energy_cost = talent.energy_cost
 
@@ -453,22 +478,38 @@ def use_talent(attacker: Character, defender: Character, talent: Talent, turn_ma
             element=effective_element,
             icd_tag=instance.icd_tag,
             icd_interval=instance.icd_interval,
+            aoe_radius=instance.aoe_radius
         )
 
-        result = calculate_damage(attacker, defender, modified_instance, turn_manager)
-        damage = result["damage"]
-        all_reactions.extend(result["reactions"])
-        actual = take_damage(defender, damage, source=attacker, team=[defender],
-                     summary=summary, taken_summary=taken_summary)
-        log_damage(
-            source=attacker,
-            target=defender,
-            amount=actual,
-            element=result["element"],
-            crit=result["crit"],
-            label=result["label"],
-            applied_element=result.get("applied_element", False)
-        )
+        if modified_instance.aoe_radius > 0:
+            targets = get_targets_in_radius(defender, all_enemies, modified_instance.aoe_radius)
+            targets.insert(0, defender)  # include primary target
+        else:
+            targets = [defender]
+
+        for target in targets:
+            result = calculate_damage(attacker, target, modified_instance, turn_manager)
+            damage = result["damage"]
+            all_reactions.extend(result["reactions"])
+
+            actual = take_damage(
+                target,
+                damage,
+                source=attacker,
+                team=[target],
+                summary=summary,
+                taken_summary=taken_summary
+            )
+
+            log_damage(
+                source=attacker,
+                target=target,
+                amount=actual,
+                element=result["element"],
+                crit=result["crit"],
+                label=result["label"],
+                applied_element=result.get("applied_element", False)
+            )
 
     allies = get_living_allies(attacker, turn_manager)
 
@@ -487,6 +528,6 @@ def use_talent(attacker: Character, defender: Character, talent: Talent, turn_ma
 
     return total_damage, all_reactions
 
-dummy.apply_elemental_effect(Element.DENDRO)
 
-battle_loop(player_team=[gaming], enemy_team=[dummy])
+
+battle_loop(player_team=[gaming], enemy_team=[dummy_a, dummy_b, dummy_c])

@@ -90,6 +90,11 @@ class StatType(Enum):
     CRIT_DMG = auto()
     ENERGY_RECHARGE = auto()
 
+@dataclass(unsafe_hash=True)
+class Position:
+    x: int
+    y: int
+
 class CombatUnit:
     def __init__(self, name: str, speed: int = 100):
         self.name = name
@@ -142,6 +147,8 @@ class Character(CombatUnit):
 
     max_hp: int = field(init=False, hash=False)
     current_hp: int = field(init=False, hash=False)
+
+    position: Position = field(default_factory=lambda: Position(0, 0))
 
     def __post_init__(self):
         self.stats = self.base_stats.copy()
@@ -302,7 +309,7 @@ class DamageInstance:
     def __init__(self, multiplier: float, scaling_stat: StatType, damage_type: DamageType,
                  base_dmg_multiplier: float = 1.0, additive_base_dmg_bonus: float = 0.0,
                  element: Element | None = None, description: str = "", tag: str = "",
-                 icd_tag: str = "", icd_interval: int = 3):
+                 icd_tag: str = "", icd_interval: int = 3, aoe_radius: float = 0.0):
         self.multiplier = multiplier
         self.scaling_stat = scaling_stat
         self.damage_type = damage_type
@@ -313,6 +320,7 @@ class DamageInstance:
         self.tag = tag
         self.icd_tag = icd_tag
         self.icd_interval = icd_interval
+        self.aoe_radius = aoe_radius
 
 class Talent:
     def __init__(self, name, description: str = "", damage_instances=None, energy_type="normal",
@@ -377,3 +385,13 @@ def get_speed(unit):
         return max(1, unit.get_stat(StatType.SPD))
     return 100  # generic fallback
 
+def distance(a: Character, b: Character) -> float:
+    dx = a.position.x - b.position.x
+    dy = a.position.y - b.position.y
+    return (dx ** 2 + dy ** 2) ** 0.5  # Euclidean distance
+
+def place_in_grid(units: list[Character], columns: int = 3, spacing: int = 1, start_x: int = 0, start_y: int = 0):
+    for i, unit in enumerate(units):
+        x = start_x + (i % columns) * spacing
+        y = start_y + (i // columns) * spacing
+        unit.position = Position(x=x, y=y)
