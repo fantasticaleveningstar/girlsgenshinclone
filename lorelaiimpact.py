@@ -240,7 +240,7 @@ dummy_a.position = Position(x=0, y=0)
 dummy_b.position = Position(x=1, y=1)
 dummy_c.position = Position(x=4, y=1)
 
-dummy_a.apply_elemental_effect(Element.ELECTRO)
+dummy_a.apply_elemental_effect(Element.HYDRO)
 
 dummies = [dummy_a, dummy_b, dummy_c]
 place_in_grid(dummies, columns=3)
@@ -529,7 +529,5 @@ def use_talent(attacker: Character, defender: Character, talent: Talent, turn_ma
         attacker.energy_pool[energy_type] -= energy_cost
 
     return total_damage, all_reactions
-
-
 
 battle_loop(player_team=[gaming], enemy_team=[dummy_a, dummy_b, dummy_c])

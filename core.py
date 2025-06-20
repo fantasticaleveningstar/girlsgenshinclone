@@ -1,30 +1,11 @@
-from enum import Enum, auto
 from dataclasses import dataclass, field
 from collections import defaultdict, namedtuple
 from typing import Optional, Callable, TYPE_CHECKING, Set
 import uuid
+from enums import DamageType, Element, StatType, AuraTag
 
 if TYPE_CHECKING:
     from turn import TurnManager
-
-class Element(Enum):
-    PHYSICAL = auto()
-    PYRO = auto()
-    HYDRO = auto()
-    ELECTRO = auto()
-    CRYO = auto()
-    GEO = auto()
-    ANEMO = auto()
-    DENDRO = auto()
-    QUANTUM = auto()
-    IMAGINARY = auto()
-
-class AuraTag(Enum):
-    QUICKEN = auto()
-    FROZEN = auto()
-    BURNING = auto()
-    ELECTRO_CHARGED = auto()
-    RIMEGRASS = auto()
 
 NON_PERSISTENT_AURAS = {Element.ANEMO, Element.GEO, Element.QUANTUM, Element.PHYSICAL}
 
@@ -74,23 +55,6 @@ REACTIONS_WITH_AURA = {
 class ElementalApplicationResult:
     reaction: Optional[str] = None
     new_aura: Optional['Aura'] = None
-
-class DamageType(Enum):
-    NORMAL_ATTACK = auto()
-    CHARGED_ATTACK = auto()
-    SKILL = auto()
-    BURST = auto()
-    REACTION = auto()
-
-class StatType(Enum):
-    ATK = auto()
-    DEF = auto()
-    HP = auto()
-    EM = auto()
-    SPD = auto()
-    CRIT_RATE = auto()
-    CRIT_DMG = auto()
-    ENERGY_RECHARGE = auto()
 
 @dataclass(unsafe_hash=True)
 class Position:
@@ -259,7 +223,6 @@ class DendroCore:
         self.position = position
         self.remaining_turns = 3  # Or time-to-live
         self.is_active = True
-
 
 @dataclass
 class Aura:

@@ -606,13 +606,13 @@ bestial_ascent = Talent(
 )
 
 aura_app = Talent(
-    name="Anemo App",
+    name="Dendro App",
     description="Gaming Skill",
     damage_instances=[
         DamageInstance(multiplier=3.917,
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
-                       element=Element.ANEMO,
+                       element=Element.DENDRO,
                        aoe_radius=0.0
                        )
     ]
@@ -625,7 +625,7 @@ suanni_dance = Talent(
         DamageInstance(multiplier=6.297,
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
-                       element=Element.QUANTUM,
+                       element=Element.ELECTRO,
                        )
     ]
 )

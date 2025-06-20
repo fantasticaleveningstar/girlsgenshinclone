@@ -20,7 +20,7 @@ def spawn_dendro_core(creator: 'Character', target: 'Character', turn_manager: '
     print(f"🌱 Dendro Core created at {core.position} by {creator.name}")
 
 def trigger_hyperbloom(core: DendroCore, attacker: 'Character', turn_manager: 'TurnManager'):
-    from combat import calculate_transformative_damage, take_damage, log_damage, get_enemies, get_targets_in_radius
+    from combat import calculate_transformative_damage, take_damage, log_damage, get_enemies
     enemies = get_enemies(attacker, turn_manager)
     if not enemies:
         return
