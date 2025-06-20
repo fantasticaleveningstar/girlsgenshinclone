@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
 from collections import defaultdict, namedtuple
 from typing import Optional, Callable, TYPE_CHECKING, Set
-import uuid
 from enums import DamageType, Element, StatType, AuraTag
+import uuid
+
 
 if TYPE_CHECKING:
     from turn import TurnManager
