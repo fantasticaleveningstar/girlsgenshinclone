@@ -4,7 +4,6 @@ from typing import Optional, Callable, TYPE_CHECKING, Set
 from elemental_enums import DamageType, Element, StatType, AuraTag
 import uuid
 
-
 if TYPE_CHECKING:
     from turn import TurnManager
 
@@ -183,6 +182,7 @@ class Character(CombatUnit):
         
         if turn_manager and element in (Element.PYRO, Element.ELECTRO):
             from dendro_core import DendroCore, trigger_hyperbloom, trigger_burgeon
+            from position_utils import distance
             for obj in turn_manager.field_objects:
                 if isinstance(obj, DendroCore) and obj.active:
                     if self.position and obj.position:
@@ -372,14 +372,3 @@ def get_speed(unit):
     if hasattr(unit, 'get_stat'):
         return max(1, unit.get_stat(StatType.SPD))
     return 100  # generic fallback
-
-def distance(a: Character, b: Character) -> float:
-    dx = a.position.x - b.position.x
-    dy = a.position.y - b.position.y
-    return (dx ** 2 + dy ** 2) ** 0.5  # Euclidean distance
-
-def place_in_grid(units: list[Character], columns: int = 3, spacing: int = 1, start_x: int = 0, start_y: int = 0):
-    for i, unit in enumerate(units):
-        x = start_x + (i % columns) * spacing
-        y = start_y + (i // columns) * spacing
-        unit.position = Position(x=x, y=y)

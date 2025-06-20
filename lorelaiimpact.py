@@ -6,9 +6,10 @@ import uuid
 from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional, Callable
-from core import Character, Element, StatType, Talent, DamageInstance, DamageType, Summon, Passive, NormalAttackChain, Position, place_in_grid
+from core import Character, Element, StatType, Talent, DamageInstance, DamageType, Summon, Passive, NormalAttackChain, Position
 from combat import calculate_damage, apply_icd, salon_attack_action, summon_salon_members, notify_hp_change, take_damage, heal, notify_damage_taken, resolve_reactions, trigger_event, log_damage, log_heal, get_living_allies, get_targets_in_radius
 from turn import TurnManager, Buff, BuffTimerUnit
+from position_utils import place_in_grid
 from characters import gaming
 
 CAN_DOUBLE_AURA = {Element.HYDRO, Element.PYRO, Element.CRYO, Element.ELECTRO}

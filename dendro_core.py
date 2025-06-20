@@ -2,10 +2,11 @@
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from core import Element, distance
+from core import Element
 
 if TYPE_CHECKING:
     from core import Character, TurnManager, Position
+    from position_utils import distance
 
 @dataclass
 class DendroCore:
