@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from collections import defaultdict, namedtuple
 from typing import Optional, Callable, TYPE_CHECKING, Set
-from enums import DamageType, Element, StatType, AuraTag
+from elemental_enums import DamageType, Element, StatType, AuraTag
 import uuid
 
 
