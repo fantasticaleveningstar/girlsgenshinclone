@@ -626,6 +626,7 @@ suanni_dance = Talent(
                        scaling_stat=StatType.ATK,
                        damage_type=DamageType.SKILL,
                        element=Element.ELECTRO,
+                       aoe_radius=3.0
                        )
     ]
 )

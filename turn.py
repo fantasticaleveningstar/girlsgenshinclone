@@ -9,6 +9,7 @@ from typing import Optional, Callable
 from core import Character, StatType, Summon, get_speed
 from constants import ELEMENT_EMOJIS
 from dendro_core import update_dendro_cores
+from grid_utils import print_grid
 
 class Buff:
     def __init__(self, name, description, stat=None, amount=0, duration=0, source=None, trigger="on_turn_start", reversible=False, effect=None, cleanup_effect=None):
@@ -58,6 +59,9 @@ class TurnManager:
     def next_turn(self):
         current_time, _, char = heapq.heappop(self.timeline)
         self.time = current_time
+        update_dendro_cores(self)
+
+        print_grid(self.units, self.field_objects)
 
         if hasattr(char, "turn_shifted"):
             char.turn_shifted = False
@@ -170,3 +174,47 @@ def get_hp_status_bar(current: int, maximum: int) -> str:
         return "🟥"
     else:
         return "💀"
+
+def get_allies(attacker: Character, turn_manager: TurnManager) -> list[Character]:
+    return [
+        unit for unit in turn_manager.units
+        if isinstance(unit, Character)
+        and is_same_team(attacker, unit, turn_manager)
+    ]
+
+def get_enemies(attacker: Character, turn_manager: TurnManager) -> list[Character]:
+    return [
+        unit for unit in turn_manager.units
+        if isinstance(unit, Character)
+        and not is_same_team(attacker, unit, turn_manager)
+    ]
+
+def is_same_team(char1: Character, char2: Character, turn_manager: TurnManager) -> bool:
+    chars = [u for u in turn_manager.units if isinstance(u, Character)]
+    cutoff = getattr(turn_manager, "player_team_size", len(chars) // 2)
+
+    try:
+        idx1 = chars.index(char1)
+        idx2 = chars.index(char2)
+    except ValueError:
+        return False  # One or both chars no longer in list
+
+    return (idx1 < cutoff and idx2 < cutoff) or (idx1 >= cutoff and idx2 >= cutoff)
+
+def get_teams(turn_manager):
+    """Splits characters into two teams using stored player_team_size."""
+    chars = [u for u in turn_manager.units if isinstance(u, Character)]
+    size = getattr(turn_manager, "player_team_size", len(chars) // 2)
+    return chars[:size], chars[size:]
+
+def get_living_allies(attacker: Character, turn_manager: TurnManager) -> list[Character]:
+    return [
+        ally for ally in get_allies(attacker, turn_manager)
+        if isinstance(ally, Character) and ally.current_hp > 0
+    ]
+
+def get_living_enemies(attacker: Character, turn_manager: TurnManager) -> list[Character]:
+    return [
+        enemy for enemy in get_enemies(attacker, turn_manager)
+        if isinstance(enemy, Character) and enemy.current_hp > 0
+    ]

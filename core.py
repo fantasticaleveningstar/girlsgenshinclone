@@ -218,13 +218,6 @@ class Character(CombatUnit):
                 print(f"{aura.name} aura on {self.name} has expired.")
         self.auras = remaining_auras
 
-class DendroCore:
-    def __init__(self, creator: Character, position: Position):
-        self.creator = creator
-        self.position = position
-        self.remaining_turns = 3  # Or time-to-live
-        self.is_active = True
-
 @dataclass
 class Aura:
     name: str
@@ -372,3 +365,4 @@ def get_speed(unit):
     if hasattr(unit, 'get_stat'):
         return max(1, unit.get_stat(StatType.SPD))
     return 100  # generic fallback
+

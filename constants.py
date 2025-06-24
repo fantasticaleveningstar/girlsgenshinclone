@@ -64,4 +64,3 @@ REACTION_AURA_CONSUMPTION = {
     "Stasis": 1.0,
     # Add more if needed
 }
-
